@@ -112,41 +112,22 @@
   let loopB = null;
   let loopOn = false;
 
-  // Real-track ("original") source: decode the .wem -> Ogg in-browser, play via <audio>.
+  // Real-track ("original") source: decode .wem -> Ogg -> AudioBuffer, played through
+  // SoundTouch (Web Audio) for pitch-preserved slowdown. Works cross-browser (incl. Firefox).
   let source = "synth";  // "synth" | "original"
-  let audioEl = null;
-  let oggUrl = null;
+  let audioBuffer = null;
+  let stNode = null, stGain = null, stFilter = null, stPipe = null, stSource = null;
   let originalReady = false;
   let originalPromise = null;
   let codebooksPromise = null;
   let preservePitch = true;
   let volume = 0.8;
-  // smooth-clock interpolation for <audio> (its currentTime updates in coarse steps)
-  let mediaBaseCt = 0;
-  let mediaBasePerf = 0;
-  let mediaLastReport = -1;
 
   function ensureCtx() {
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     return audioCtx;
   }
   function songTime() {
-    if (source === "original" && audioEl) {
-      const actual = audioEl.currentTime;
-      if (audioEl.paused) {
-        mediaLastReport = actual; mediaBaseCt = actual; mediaBasePerf = performance.now();
-        return actual;
-      }
-      // re-anchor whenever the media reports a fresh (coarse) time, then interpolate between
-      if (actual !== mediaLastReport) {
-        mediaLastReport = actual; mediaBaseCt = actual; mediaBasePerf = performance.now();
-      }
-      let predicted = mediaBaseCt + ((performance.now() - mediaBasePerf) / 1000) * (audioEl.playbackRate || 1);
-      const cap = Math.min(songLength(), actual + 0.35); // don't drift far ahead if media stalls
-      if (predicted > cap) predicted = cap;
-      if (predicted < actual) predicted = actual;
-      return predicted;
-    }
     return playing ? startPos + (audioCtx.currentTime - startCtxTime) * rate : pausedPos;
   }
   function songLength() { return song ? song.length : 0; }
@@ -162,8 +143,8 @@
   function resetOriginal() {
     originalReady = false;
     originalPromise = null;
-    if (audioEl) { try { audioEl.pause(); } catch (_) {} audioEl = null; }
-    if (oggUrl) { URL.revokeObjectURL(oggUrl); oggUrl = null; }
+    stopOriginal();
+    audioBuffer = null;
     source = "synth";
     sourceSel.value = "synth";
     infoSource.textContent = "Синтезатор";
@@ -174,27 +155,14 @@
     if (originalPromise) return originalPromise;
     if (!song || !song.audioWem) { if (!silent) statusEl.textContent = "В этом psarc нет аудиодорожки"; return Promise.resolve(false); }
     if (!window.WemToOgg) { if (!silent) statusEl.textContent = "Конвертер аудио не загружен"; return Promise.resolve(false); }
+    if (!window.SoundTouchLib) { if (!silent) statusEl.textContent = "Движок звука не загружен"; return Promise.resolve(false); }
     if (!silent) statusEl.textContent = "Декодирую оригинал… (несколько секунд)";
     originalPromise = (async () => {
       try {
         const cb = await fetchCodebooks();
         const ogg = window.WemToOgg.convert(song.audioWem, cb);
-        const blob = new Blob([ogg], { type: "audio/ogg" });
-        oggUrl = URL.createObjectURL(blob);
-        audioEl = new Audio();
-        audioEl.src = oggUrl;
-        audioEl.preservesPitch = preservePitch;
-        audioEl.playbackRate = rate;
-        audioEl.volume = volume;
-        await new Promise((res, rej) => {
-          audioEl.addEventListener("loadedmetadata", res, { once: true });
-          audioEl.addEventListener("error", () => rej(new Error("decode failed")), { once: true });
-          setTimeout(res, 8000);
-        });
-        audioEl.addEventListener("ended", () => {
-          if (loopOn && loopA != null) { audioEl.currentTime = loopA; audioEl.play(); return; }
-          playing = false; playBtn.textContent = "▶";
-        });
+        const ctx = ensureCtx();
+        audioBuffer = await ctx.decodeAudioData(ogg.buffer.slice(ogg.byteOffset, ogg.byteOffset + ogg.byteLength));
         originalReady = true;
         statusEl.textContent = "";
         return true;
@@ -207,14 +175,45 @@
     return originalPromise;
   }
 
+  // ---- SoundTouch playback engine for the original track ----
+  function applyStRate() {
+    if (!stPipe) return;
+    if (preservePitch) { stPipe.tempo = rate; stPipe.pitch = 1; stPipe.rate = 1; }
+    else { stPipe.tempo = 1; stPipe.pitch = 1; stPipe.rate = rate; } // varispeed (pitch drops)
+  }
+  function startOriginal(fromPos) {
+    if (!audioBuffer || !window.SoundTouchLib) return;
+    const ctx = audioCtx;
+    const ST = window.SoundTouchLib;
+    stSource = new ST.WebAudioBufferSource(audioBuffer);
+    stPipe = new ST.SoundTouch();
+    applyStRate();
+    stFilter = new ST.SimpleFilter(stSource, stPipe);
+    stFilter.sourcePosition = Math.floor(clamp(fromPos, 0, songLength()) * audioBuffer.sampleRate);
+    stNode = ST.getWebAudioNode(ctx, stFilter);
+    stGain = ctx.createGain();
+    stGain.gain.value = volume;
+    stNode.connect(stGain);
+    stGain.connect(ctx.destination);
+  }
+  function stopOriginal() {
+    if (stNode) { try { stNode.disconnect(); } catch (_) {} stNode = null; }
+    if (stGain) { try { stGain.disconnect(); } catch (_) {} stGain = null; }
+    stFilter = null; stSource = null; stPipe = null;
+  }
+
   function reanchor() {
-    // call when changing rate or looping while playing
+    // call when changing rate while playing
     if (!playing) return;
     startPos = clamp(songTime(), 0, songLength());
     startCtxTime = audioCtx.currentTime;
-    stopVoices();
-    amp = buildAmp(audioCtx);
-    schedIdx = firstNoteIdx(startPos);
+    if (source === "original") {
+      applyStRate();
+    } else {
+      stopVoices();
+      amp = buildAmp(audioCtx);
+      schedIdx = firstNoteIdx(startPos);
+    }
   }
 
   function buildDistortion(amount) {
@@ -290,57 +289,37 @@
 
   async function play() {
     if (!arr || playing) return;
-    if (source === "original") {
-      // Don't await before play(): Firefox revokes the user-gesture across awaits
-      // and blocks audio.play(). The track is pre-decoded in the background on load,
-      // so it's normally ready by the time Play is pressed.
-      if (!originalReady || !audioEl) {
-        ensureOriginal();
-        statusEl.textContent = originalPromise ? "Декодирую оригинал… нажми Play ещё раз через секунду" : "Оригинал недоступен";
-        return;
-      }
-      if (audioEl.currentTime >= songLength() - 0.05) audioEl.currentTime = 0;
-      audioEl.playbackRate = rate;
-      audioEl.preservesPitch = preservePitch;
-      try {
-        await audioEl.play();
-      } catch (_) {
-        statusEl.textContent = "Firefox заблокировал звук: разреши автозапуск аудио для сайта (значок слева в адресной строке) и нажми Play";
-        return;
-      }
-      playing = true; playBtn.textContent = "❚❚"; statusEl.textContent = ""; startLoop();
+    const ctx = ensureCtx();
+    if (source === "original" && !originalReady) {
+      ensureOriginal();
+      statusEl.textContent = originalPromise ? "Декодирую оригинал… нажми Play через секунду" : "Оригинал недоступен";
       return;
     }
-    const ctx = ensureCtx();
     await ctx.resume();
     if (pausedPos >= songLength() - 0.05) pausedPos = 0;
-    amp = buildAmp(ctx);
     startPos = pausedPos;
     startCtxTime = ctx.currentTime;
-    schedIdx = firstNoteIdx(startPos);
+    if (source === "original") startOriginal(startPos);
+    else { amp = buildAmp(ctx); schedIdx = firstNoteIdx(startPos); }
     playing = true;
     playBtn.textContent = "❚❚";
+    statusEl.textContent = "";
     startLoop();
   }
   function pause() {
     if (!playing) return;
-    if (source === "original" && audioEl) {
-      audioEl.pause(); playing = false; playBtn.textContent = "▶"; return;
-    }
     pausedPos = clamp(songTime(), 0, songLength());
     playing = false;
-    stopVoices();
+    if (source === "original") stopOriginal(); else stopVoices();
     playBtn.textContent = "▶";
   }
   function seek(t) {
     t = clamp(t, 0, songLength());
-    if (source === "original" && audioEl) { audioEl.currentTime = t; renderFrame(); return; }
     if (playing) {
-      stopVoices();
-      amp = buildAmp(audioCtx);
       startPos = t;
       startCtxTime = audioCtx.currentTime;
-      schedIdx = firstNoteIdx(t);
+      if (source === "original") { stopOriginal(); startOriginal(t); }
+      else { stopVoices(); amp = buildAmp(audioCtx); schedIdx = firstNoteIdx(t); }
     } else {
       pausedPos = t;
     }
@@ -385,19 +364,18 @@
 
   tempoSel.addEventListener("change", () => {
     rate = parseFloat(tempoSel.value) || 1;
-    if (source === "original" && audioEl) { audioEl.playbackRate = rate; audioEl.preservesPitch = preservePitch; }
-    else reanchor();
+    reanchor();
     renderFrame();
   });
 
   pitchKeep.addEventListener("change", () => {
     preservePitch = pitchKeep.checked;
-    if (source === "original" && audioEl) audioEl.preservesPitch = preservePitch;
+    if (source === "original") applyStRate();
   });
 
   volumeSlider.addEventListener("input", () => {
     volume = clamp((parseInt(volumeSlider.value, 10) || 0) / 100, 0, 1);
-    if (audioEl) audioEl.volume = volume;
+    if (stGain) stGain.gain.value = volume;
     if (amp && amp.master) amp.master.gain.value = 0.16 * volume;
   });
 
@@ -417,7 +395,7 @@
         return;
       }
       if (source !== "original") return;   // user switched back while decoding
-      audioEl.currentTime = clamp(t, 0, songLength());
+      pausedPos = clamp(t, 0, songLength());
       if (wasPlaying) play();
     } else {
       source = "synth";
@@ -1246,12 +1224,10 @@
         rafId = requestAnimationFrame(loop);
         return;
       }
-      if (source === "synth") {
-        scheduleAhead();
-        if (t >= songLength()) {
-          if (loopOn && loopA != null) { seek(loopA); rafId = requestAnimationFrame(loop); return; }
-          pause(); pausedPos = songLength(); renderFrame(); return;
-        }
+      if (source === "synth") scheduleAhead();
+      if (t >= songLength()) {
+        if (loopOn && loopA != null) { seek(loopA); rafId = requestAnimationFrame(loop); return; }
+        pause(); pausedPos = songLength(); renderFrame(); return;
       }
     }
     renderFrame();
@@ -1290,5 +1266,5 @@
     ro.observe(canvas);
   }
 
-  console.info("[fretboard] song analyzer build 15");
+  console.info("[fretboard] song analyzer build 16");
 })();
