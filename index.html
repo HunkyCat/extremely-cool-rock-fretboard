@@ -7,7 +7,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta name="description" content="Interactive guitar fretboard visualizer with scale, tuning, and CAGED mode support.">
   <title>My Guitar Fretboard</title>
-  <link rel="stylesheet" href="./styles.css?v=13">
+  <link rel="stylesheet" href="./styles.css?v=14">
 </head>
 <body>
   <div class="world-layer" aria-hidden="true">
@@ -33,7 +33,7 @@
     <nav class="tabs" role="tablist">
       <button class="tab is-active" type="button" data-tab="fretboard" role="tab" aria-selected="true">Гриф</button>
       <button class="tab" type="button" data-tab="song" role="tab" aria-selected="false">Разбор песни</button>
-      <span id="buildBadge" class="build-badge">build 13</span>
+      <span id="buildBadge" class="build-badge">build 14</span>
     </nav>
 
     <div id="tab-fretboard" class="tab-panel is-active" role="tabpanel">
@@ -156,10 +156,14 @@
         <div class="transport">
           <button id="playBtn" class="riff-btn play-btn" type="button" aria-label="Играть">▶</button>
           <span id="timeNow" class="time">0:00</span>
-          <div id="timeline" class="timeline" role="slider" aria-label="Позиция в песне" tabindex="0">
+          <div id="timeline" class="timeline" role="slider" aria-label="Позиция в песне" tabindex="0" title="Колесо — зум · Shift+тащить — выделить петлю · Ctrl+тащить — листать · двойной клик — сброс зума">
             <canvas id="densityCanvas" class="density"></canvas>
             <div id="sections" class="sections"></div>
-            <div id="loopRegion" class="loop-region" hidden></div>
+            <div id="loopRegion" class="loop-region" hidden>
+              <div class="loop-mid" id="loopMid"></div>
+              <div class="loop-handle h-a" id="loopHandleA"></div>
+              <div class="loop-handle h-b" id="loopHandleB"></div>
+            </div>
             <div id="playhead" class="playhead"></div>
           </div>
           <span id="timeTotal" class="time">0:00</span>
@@ -243,9 +247,9 @@
     </div>
   </main>
 
-  <script src="./app.js?v=13"></script>
-  <script src="./rs-parse.js?v=13"></script>
-  <script src="./wem2ogg.js?v=13"></script>
-  <script src="./song.js?v=13"></script>
+  <script src="./app.js?v=14"></script>
+  <script src="./rs-parse.js?v=14"></script>
+  <script src="./wem2ogg.js?v=14"></script>
+  <script src="./song.js?v=14"></script>
 </body>
 </html>

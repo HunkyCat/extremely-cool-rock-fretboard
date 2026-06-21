@@ -613,12 +613,13 @@ input:disabled {
 .timeline {
   position: relative;
   flex: 1;
-  height: 54px;
+  height: 88px;
   border-radius: 10px;
   border: 1px solid rgba(147, 129, 113, 0.5);
   background: rgba(8, 12, 18, 0.7);
   overflow: hidden;
   cursor: pointer;
+  touch-action: none;
 }
 
 .timeline .density {
@@ -719,6 +720,26 @@ input:disabled {
   pointer-events: none;
 }
 
+.timeline .loop-region .loop-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 12px;
+  background: rgba(56, 189, 248, 0.55);
+  pointer-events: auto;
+  cursor: ew-resize;
+}
+.timeline .loop-region .loop-handle.h-a { left: -7px; border-radius: 4px 0 0 4px; }
+.timeline .loop-region .loop-handle.h-b { right: -7px; border-radius: 0 4px 4px 0; }
+.timeline .loop-region .loop-mid { position: absolute; inset: 0; pointer-events: auto; cursor: grab; }
+
+.timeline-hint {
+  font-size: 0.7rem;
+  color: var(--text-soft);
+  opacity: 0.7;
+  margin-top: 2px;
+}
+
 /* Scale ribbon: detected scale per section across the song */
 .scale-ribbon {
   display: flex;
@@ -800,7 +821,10 @@ input:disabled {
   width: 100%;
   height: 50%;
   border-bottom: 2px solid rgba(255, 124, 34, 0.35);
+  cursor: grab;
+  touch-action: none;
 }
+.highway:active { cursor: grabbing; }
 
 #songCanvas {
   display: block;

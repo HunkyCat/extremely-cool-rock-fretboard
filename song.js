@@ -44,6 +44,9 @@
   const sectionsEl = document.getElementById("sections");
   const playheadEl = document.getElementById("playhead");
   const loopRegionEl = document.getElementById("loopRegion");
+  const loopMidEl = document.getElementById("loopMid");
+  const loopHandleAEl = document.getElementById("loopHandleA");
+  const loopHandleBEl = document.getElementById("loopHandleB");
   const canvas = document.getElementById("songCanvas");
   const highway = document.getElementById("highwayCanvas");
   const sourceSel = document.getElementById("sourceSel");
@@ -371,8 +374,9 @@
     loopBbtn.classList.toggle("is-on", loopB != null);
     if (loopA != null && loopB != null && loopB > loopA && song) {
       loopRegionEl.hidden = false;
-      loopRegionEl.style.left = `${(loopA / song.length) * 100}%`;
-      loopRegionEl.style.width = `${((loopB - loopA) / song.length) * 100}%`;
+      const l = pctOf(loopA);
+      loopRegionEl.style.left = `${l}%`;
+      loopRegionEl.style.width = `${pctOf(loopB) - l}%`;
     } else {
       loopRegionEl.hidden = true;
     }
@@ -519,8 +523,8 @@
     for (const n of arr.notes) if (n.f > maxFret) maxFret = n.f;
     frets = clamp(maxFret + 1, 12, 24);
     precomputeSectionScales();
-    drawDensity();
-    drawSections();
+    viewStart = 0; viewEnd = 0; // reset zoom to full song
+    layoutTimeline();
     buildScaleRibbon();
     resizeCanvas();
     renderFrame();
@@ -590,51 +594,194 @@
     return -1;
   }
 
-  // ============ Timeline ============
+  // ============ Timeline (zoomable) ============
+  let viewStart = 0;
+  let viewEnd = 0; // <=viewStart means "full song"
+  function vStart() { return viewEnd > viewStart ? viewStart : 0; }
+  function vSpan() { return (viewEnd > viewStart ? viewEnd - viewStart : songLength()) || 1; }
+  function pctOf(t) { return ((t - vStart()) / vSpan()) * 100; }
+  function timeAtClientX(clientX) {
+    const rect = timeline.getBoundingClientRect();
+    return clamp(vStart() + ((clientX - rect.left) / rect.width) * vSpan(), 0, songLength());
+  }
+  function resetZoom() { viewStart = 0; viewEnd = songLength(); layoutTimeline(); }
+  function layoutTimeline() { drawDensity(); drawSections(); updateLoopUI(); }
+
   function drawDensity() {
     const w = densityCanvas.clientWidth || timeline.clientWidth || 600;
-    const h = densityCanvas.clientHeight || 54;
+    const h = densityCanvas.clientHeight || 88;
     const dpr = Math.max(1, window.devicePixelRatio || 1);
     densityCanvas.width = Math.floor(w * dpr);
     densityCanvas.height = Math.floor(h * dpr);
     const ctx = densityCanvas.getContext("2d");
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
+    const vs = vStart(), sp = vSpan();
+
+    // measure ticks (bar divisions); numbers when zoomed in enough
+    if (arr.measures && arr.measures.length) {
+      const pxPerMeasure = (w / sp) * (sp / Math.max(1, arr.measures.length)) * 0; // placeholder
+      const avgBeatSec = 60 / Math.max(1, arr.tempo);
+      const measSec = avgBeatSec * (arr.timeSig ? arr.timeSig.num : 4);
+      const pxPerMeas = (measSec / sp) * w;
+      ctx.font = "700 10px Rajdhani, Segoe UI, sans-serif";
+      ctx.textAlign = "left"; ctx.textBaseline = "top";
+      for (const m of arr.measures) {
+        if (m.t < vs - 0.01 || m.t > vs + sp) continue;
+        const x = ((m.t - vs) / sp) * w;
+        ctx.fillStyle = "rgba(255,255,255,0.10)";
+        ctx.fillRect(x, 0, 1, h);
+        if (pxPerMeas > 34 || m.measure % 4 === 0) {
+          ctx.fillStyle = "rgba(200,210,225,0.55)";
+          ctx.fillText(String(m.measure), x + 2, 2);
+        }
+      }
+    }
+
+    // note density for the visible window
     const cols = Math.max(60, Math.floor(w / 3));
     const buckets = new Array(cols).fill(0);
-    for (const n of arr.notes) buckets[clamp(Math.floor((n.t / song.length) * cols), 0, cols - 1)] += 1;
+    for (const n of arr.notes) {
+      if (n.t < vs || n.t > vs + sp) continue;
+      buckets[clamp(Math.floor(((n.t - vs) / sp) * cols), 0, cols - 1)] += 1;
+    }
     const peak = Math.max(1, ...buckets);
     const bw = w / cols;
     for (let c = 0; c < cols; c += 1) {
-      const bh = (buckets[c] / peak) * (h - 6);
+      const bh = (buckets[c] / peak) * (h - 18);
       ctx.fillStyle = "rgba(255, 138, 61, 0.35)";
       ctx.fillRect(c * bw, h - bh, Math.max(1, bw - 0.5), bh);
     }
   }
+
   function drawSections() {
     sectionsEl.innerHTML = "";
+    const vs = vStart(), sp = vSpan();
     for (const sec of arr.sections) {
+      const left = ((sec.t - vs) / sp) * 100;
+      if (left < -5 || left > 105) continue;
       const seg = document.createElement("div");
       seg.className = "seg";
-      seg.style.left = `${(sec.t / song.length) * 100}%`;
+      seg.style.left = `${left}%`;
       const label = document.createElement("span");
       label.textContent = sec.name;
       seg.appendChild(label);
       sectionsEl.appendChild(seg);
     }
   }
-  function seekFromClientX(clientX) {
-    const rect = timeline.getBoundingClientRect();
-    seek(clamp((clientX - rect.left) / rect.width, 0, 1) * song.length);
-  }
+
+  function seekFromClientX(clientX) { seek(timeAtClientX(clientX)); }
+
   let dragging = false;
-  timeline.addEventListener("pointerdown", (e) => { dragging = true; timeline.setPointerCapture(e.pointerId); seekFromClientX(e.clientX); startLoop(); });
-  timeline.addEventListener("pointermove", (e) => { if (dragging) seekFromClientX(e.clientX); });
-  timeline.addEventListener("pointerup", (e) => { dragging = false; try { timeline.releasePointerCapture(e.pointerId); } catch (_) {} });
+  let panning = false;
+  let panStartX = 0, panStartView = 0;
+  let loopDragMode = null; // "create" | "a" | "b" | "mid"
+  timeline.addEventListener("pointerdown", (e) => {
+    if (!song) return;
+    if (e.shiftKey) {
+      // Shift+drag = select loop region
+      loopDragMode = "create";
+      loopA = timeAtClientX(e.clientX); loopB = loopA;
+      timeline.setPointerCapture(e.pointerId);
+      return;
+    }
+    if (e.ctrlKey && viewEnd > viewStart) {
+      // Ctrl+drag = pan (when zoomed)
+      panning = true; panStartX = e.clientX; panStartView = vStart();
+      timeline.setPointerCapture(e.pointerId);
+      return;
+    }
+    dragging = true; timeline.setPointerCapture(e.pointerId); seekFromClientX(e.clientX); startLoop();
+  });
+  timeline.addEventListener("pointermove", (e) => {
+    if (loopDragMode === "create") {
+      loopB = timeAtClientX(e.clientX);
+      if (loopB < loopA) { const t = loopA; loopA = loopB; loopB = t; }
+      loopOn = true; updateLoopUI();
+    } else if (panning) {
+      const rect = timeline.getBoundingClientRect();
+      const dt = ((e.clientX - panStartX) / rect.width) * vSpan();
+      let ns = clamp(panStartView - dt, 0, songLength() - vSpan());
+      viewStart = ns; viewEnd = ns + vSpan(); layoutTimeline();
+    } else if (dragging) {
+      seekFromClientX(e.clientX);
+    }
+  });
+  timeline.addEventListener("pointerup", (e) => {
+    dragging = false; panning = false; loopDragMode = null;
+    try { timeline.releasePointerCapture(e.pointerId); } catch (_) {}
+  });
+
+  // wheel = zoom around cursor
+  timeline.addEventListener("wheel", (e) => {
+    if (!song) return;
+    e.preventDefault();
+    const len = songLength();
+    const cursorT = timeAtClientX(e.clientX);
+    const sp = vSpan();
+    const newSpan = clamp(sp * (e.deltaY < 0 ? 0.8 : 1.25), 3, len);
+    let ns = cursorT - (cursorT - vStart()) * (newSpan / sp);
+    let ne = ns + newSpan;
+    if (ns < 0) { ns = 0; ne = newSpan; }
+    if (ne > len) { ne = len; ns = len - newSpan; }
+    if (newSpan >= len - 0.01) { viewStart = 0; viewEnd = len; } else { viewStart = Math.max(0, ns); viewEnd = Math.min(len, ne); }
+    layoutTimeline();
+  }, { passive: false });
+
+  timeline.addEventListener("dblclick", () => { if (song) resetZoom(); });
+
+  // ---- draggable loop handles (#6) ----
+  let loopMidStartX = 0, loopMidA = 0, loopMidB = 0;
+  function bindLoopHandle(el, mode) {
+    el.addEventListener("pointerdown", (e) => {
+      e.stopPropagation();
+      loopDragMode = mode;
+      if (mode === "mid") { loopMidStartX = e.clientX; loopMidA = loopA; loopMidB = loopB; }
+      el.setPointerCapture(e.pointerId);
+      loopOn = true;
+    });
+    el.addEventListener("pointermove", (e) => {
+      if (loopDragMode !== mode) return;
+      if (mode === "a") { loopA = Math.min(timeAtClientX(e.clientX), (loopB ?? songLength()) - 0.1); }
+      else if (mode === "b") { loopB = Math.max(timeAtClientX(e.clientX), (loopA ?? 0) + 0.1); }
+      else if (mode === "mid") {
+        const rect = timeline.getBoundingClientRect();
+        const dt = ((e.clientX - loopMidStartX) / rect.width) * vSpan();
+        const span = loopMidB - loopMidA;
+        let na = clamp(loopMidA + dt, 0, songLength() - span);
+        loopA = na; loopB = na + span;
+      }
+      updateLoopUI();
+    });
+    el.addEventListener("pointerup", (e) => { loopDragMode = null; try { el.releasePointerCapture(e.pointerId); } catch (_) {} });
+  }
+  bindLoopHandle(loopHandleAEl, "a");
+  bindLoopHandle(loopHandleBEl, "b");
+  bindLoopHandle(loopMidEl, "mid");
+
+  // Drag the highway left/right to scrub smoothly through the song
+  let hwDrag = false, hwDragX = 0, hwDragT = 0, hwMoved = false;
+  highway.addEventListener("pointerdown", (e) => {
+    if (!arr) return;
+    hwDrag = true; hwMoved = false; hwDragX = e.clientX; hwDragT = songTime();
+    try { highway.setPointerCapture(e.pointerId); } catch (_) {}
+    startLoop();
+  });
+  highway.addEventListener("pointermove", (e) => {
+    if (!hwDrag) return;
+    const dx = e.clientX - hwDragX;
+    if (Math.abs(dx) > 2) hwMoved = true;
+    const dt = -(dx / (hwTrackW || 1)) * HW_WINDOW; // drag left = advance
+    seek(clamp(hwDragT + dt, 0, songLength()));
+  });
+  const endHwDrag = (e) => { hwDrag = false; try { highway.releasePointerCapture(e.pointerId); } catch (_) {} };
+  highway.addEventListener("pointerup", endHwDrag);
+  highway.addEventListener("pointercancel", endHwDrag);
 
   // ============ Board rendering ============
   let cssW = 0, cssH = 0;
   let hwW = 0, hwH = 0;
+  let hwTrackW = 1;
   function resizeCanvas() {
     const dpr = Math.max(1, window.devicePixelRatio || 1);
     const rect = canvas.getBoundingClientRect();
@@ -816,7 +963,15 @@
     renderHighway(t);
     renderLyrics(t);
     updateInfo(t, secIdx, scale, active);
-    playheadEl.style.left = `${clamp(t / song.length, 0, 1) * 100}%`;
+    // auto-follow the playhead when zoomed in and playing
+    if (playing && viewEnd > viewStart) {
+      const sp = vSpan();
+      if (t < viewStart + sp * 0.05 || t > viewStart + sp * 0.85) {
+        let ns = clamp(t - sp * 0.3, 0, songLength() - sp);
+        if (Math.abs(ns - viewStart) > 0.01) { viewStart = ns; viewEnd = ns + sp; layoutTimeline(); }
+      }
+    }
+    playheadEl.style.left = `${clamp(pctOf(t), 0, 100)}%`;
     timeNowEl.textContent = fmtTime(t);
   }
 
@@ -832,6 +987,7 @@
     const strikeX = 78;
     const rowH = hwH / 6;
     const trackW = hwW - strikeX - 12;
+    hwTrackW = trackW; // for drag-scrub
     const head = Math.min(rowH * 0.82, 50);
     const rowOf = (s) => (invertHW ? 5 - s : s);
     const yFor = (s) => (rowOf(s) + 0.5) * rowH;
@@ -886,7 +1042,7 @@
       if (xTail < 0 || xHead > hwW) continue; // fully off-screen
       const y = yFor(n.s);
       const color = STRING_COLORS[n.s];
-      const dim = n.pm ? 0.55 : 1;
+      const dim = n.pm ? 0.68 : 1;
 
       // sustain trail (head -> tail), clipped to visible area
       if (xTail - xHead > 3) {
@@ -907,10 +1063,15 @@
         ctx.lineWidth = hit ? 4 : (n.acc ? 3 : 1.5);
         ctx.strokeStyle = hit ? "#fff7ed" : (n.acc ? "#fde68a" : "rgba(0,0,0,0.35)");
         roundRect(ctx, xHead - head / 2, y - head / 2, head, head, 9); ctx.stroke();
-        // fret number — big and dark for contrast
-        ctx.fillStyle = "#0b1220";
-        ctx.font = `800 ${Math.round(head * 0.56)}px Rajdhani, Segoe UI, sans-serif`;
+        // fret number — white with a dark outline so it reads on any square (incl. dim palm-mute)
+        const fs = Math.round(head * 0.58);
+        ctx.font = `800 ${fs}px Rajdhani, Segoe UI, sans-serif`;
         ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.lineWidth = Math.max(3, fs * 0.2);
+        ctx.lineJoin = "round";
+        ctx.strokeStyle = "rgba(6,10,18,0.92)";
+        ctx.strokeText(String(n.f), xHead, y + 1);
+        ctx.fillStyle = "#ffffff";
         ctx.fillText(String(n.f), xHead, y + 1);
         // technique badge (top-right corner of gem)
         const g = techGlyph(n);
@@ -1108,10 +1269,10 @@
 
   window.addEventListener("resize", () => {
     if (!songTabActive || !arr) return;
-    resizeCanvas(); drawDensity(); renderFrame();
+    resizeCanvas(); layoutTimeline(); renderFrame();
   });
 
   bindDrop();
   updateOrientUI();
-  console.info("[fretboard] song analyzer build 13");
+  console.info("[fretboard] song analyzer build 14");
 })();
