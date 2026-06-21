@@ -475,8 +475,12 @@
       pausedPos = 0;
       buildSong();
       songTab.classList.add("song-loaded");
-      resizeCanvas();
-      renderFrame();
+      // The stage was hidden during buildSong, so canvases measured 0 width and
+      // rendered blurry. Re-measure + redraw once layout has actually flushed.
+      const redraw = () => { if (arr) { resizeCanvas(); layoutTimeline(); renderFrame(); } };
+      requestAnimationFrame(redraw);
+      setTimeout(redraw, 120);
+      setTimeout(redraw, 350);
       dropStatus.textContent = "";
     } catch (err) {
       dropStatus.textContent = "Не удалось разобрать: " + err.message;
@@ -1274,5 +1278,17 @@
 
   bindDrop();
   updateOrientUI();
-  console.info("[fretboard] song analyzer build 14");
+
+  // Redraw canvases whenever the stage gets/changes size (fixes blurry first paint
+  // when the song stage was still hidden at load time).
+  if (window.ResizeObserver) {
+    const ro = new ResizeObserver(() => {
+      if (!songTabActive || !arr) return;
+      resizeCanvas(); layoutTimeline(); renderFrame();
+    });
+    ro.observe(timeline);
+    ro.observe(canvas);
+  }
+
+  console.info("[fretboard] song analyzer build 15");
 })();
