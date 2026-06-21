@@ -1067,4 +1067,5 @@
 
   bindDrop();
   updateOrientUI();
+  console.info("[fretboard] song analyzer build 10");
 })();

@@ -793,6 +793,16 @@ input:disabled {
   white-space: nowrap;
 }
 
+.build-badge {
+  margin-left: auto;
+  align-self: center;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--accent-soft);
+  opacity: 0.7;
+  padding: 2px 8px;
+}
+
 .song-props {
   display: block;
   margin-top: 4px;

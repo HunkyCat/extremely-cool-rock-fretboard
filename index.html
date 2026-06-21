@@ -7,7 +7,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta name="description" content="Interactive guitar fretboard visualizer with scale, tuning, and CAGED mode support.">
   <title>My Guitar Fretboard</title>
-  <link rel="stylesheet" href="./styles.css?v=9">
+  <link rel="stylesheet" href="./styles.css?v=10">
 </head>
 <body>
   <div class="world-layer" aria-hidden="true">
@@ -33,6 +33,7 @@
     <nav class="tabs" role="tablist">
       <button class="tab is-active" type="button" data-tab="fretboard" role="tab" aria-selected="true">Гриф</button>
       <button class="tab" type="button" data-tab="song" role="tab" aria-selected="false">Разбор песни</button>
+      <span id="buildBadge" class="build-badge">build 10</span>
     </nav>
 
     <div id="tab-fretboard" class="tab-panel is-active" role="tabpanel">
@@ -235,9 +236,9 @@
     </div>
   </main>
 
-  <script src="./app.js?v=9"></script>
-  <script src="./rs-parse.js?v=9"></script>
-  <script src="./wem2ogg.js?v=9"></script>
-  <script src="./song.js?v=9"></script>
+  <script src="./app.js?v=10"></script>
+  <script src="./rs-parse.js?v=10"></script>
+  <script src="./wem2ogg.js?v=10"></script>
+  <script src="./song.js?v=10"></script>
 </body>
 </html>
