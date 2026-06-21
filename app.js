@@ -1275,7 +1275,8 @@
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
 
-    const stringIndex = clamp(Math.round((y - lastLayout.stringTop) / lastLayout.stringGap), 0, 5);
+    const row = clamp(Math.round((y - lastLayout.stringTop) / lastLayout.stringGap), 0, 5);
+    const stringIndex = invertBoard ? 5 - row : row; // map visual row back to string index
     const fret = clamp(Math.round((x - lastLayout.plotLeft) / lastLayout.fretWidth + 0.5), 0, lastState.frets);
 
     try {

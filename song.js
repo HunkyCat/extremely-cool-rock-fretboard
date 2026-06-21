@@ -760,6 +760,45 @@
   highway.addEventListener("pointerup", endHwDrag);
   highway.addEventListener("pointercancel", endHwDrag);
 
+  // Click the fretboard to hear a note (respects the board inversion)
+  let clickFlash = null;
+  function playClickedNoteSong(s, f) {
+    if (s < 0 || s > 5 || !arr) return;
+    const ctx = ensureCtx();
+    ctx.resume();
+    const midi = arr.openMidi[s] + f;
+    const freq = midiToFreq(midi);
+    const now = ctx.currentTime + 0.01;
+    const a = buildAmp(ctx);
+    const osc = ctx.createOscillator();
+    const osc2 = ctx.createOscillator();
+    const tone = ctx.createBiquadFilter();
+    const g = ctx.createGain();
+    osc.type = "sawtooth"; osc2.type = "sawtooth";
+    osc.frequency.value = freq; osc2.frequency.value = freq; osc2.detune.value = 6;
+    tone.type = "lowpass"; tone.frequency.value = 3000;
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.linearRampToValueAtTime(0.26, now + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.55);
+    osc.connect(tone); osc2.connect(tone); tone.connect(g); g.connect(a.input);
+    osc.start(now); osc2.start(now); osc.stop(now + 0.6); osc2.stop(now + 0.6);
+    setTimeout(() => { a.nodes.forEach((n) => { try { n.disconnect(); } catch (_) {} }); }, 900);
+  }
+  canvas.addEventListener("click", (e) => {
+    if (!arr || !cssW) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const L = layout();
+    const row = clamp(Math.round((y - L.sTop) / L.gap), 0, 5);
+    const s = invertBoard ? 5 - row : row;
+    const f = x < L.left - 2 ? 0 : clamp(Math.round((x - L.left) / L.fw + 0.5), 1, frets);
+    clickFlash = { s, f, t0: performance.now() };
+    playClickedNoteSong(s, f);
+    renderFrame();
+    setTimeout(() => { clickFlash = null; renderFrame(); }, 480);
+  });
+
   // ============ Board rendering ============
   let cssW = 0, cssH = 0;
   let hwW = 0, hwH = 0;
@@ -936,6 +975,13 @@
         ctx.fillStyle = "#fde68a"; ctx.font = "700 12px Rajdhani, Segoe UI, sans-serif";
         ctx.fillText(g, x + r + 8, y - r);
       }
+    }
+
+    // click-to-play flash
+    if (clickFlash && performance.now() - clickFlash.t0 < 480 && clickFlash.s >= 0 && clickFlash.s <= 5) {
+      const x = xNote(L, clickFlash.f), y = yString(L, clickFlash.s);
+      ctx.strokeStyle = "#fef3c7"; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(x, y, r + 5, 0, Math.PI * 2); ctx.stroke();
     }
 
     ctx.fillStyle = "#94a3b8"; ctx.font = "600 11px Rajdhani, Segoe UI, sans-serif"; ctx.textAlign = "center";
@@ -1266,5 +1312,5 @@
     ro.observe(canvas);
   }
 
-  console.info("[fretboard] song analyzer build 16");
+  console.info("[fretboard] song analyzer build 17");
 })();
