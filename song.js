@@ -283,16 +283,25 @@
   async function play() {
     if (!arr || playing) return;
     if (source === "original") {
-      if (!originalReady) {
-        const ok = await ensureOriginal();
-        if (!ok || source !== "original" || playing) return; // failed, switched away, or already started
+      // Don't await before play(): Firefox revokes the user-gesture across awaits
+      // and blocks audio.play(). The track is pre-decoded in the background on load,
+      // so it's normally ready by the time Play is pressed.
+      if (!originalReady || !audioEl) {
+        ensureOriginal();
+        statusEl.textContent = originalPromise ? "Декодирую оригинал… нажми Play ещё раз через секунду" : "Оригинал недоступен";
+        return;
       }
-      if (!audioEl) return;
       if (audioEl.currentTime >= songLength() - 0.05) audioEl.currentTime = 0;
       audioEl.playbackRate = rate;
       audioEl.preservesPitch = preservePitch;
-      try { await audioEl.play(); } catch (_) { statusEl.textContent = "Браузер заблокировал аудио — нажми ещё раз"; return; }
-      playing = true; playBtn.textContent = "❚❚"; startLoop(); return;
+      try {
+        await audioEl.play();
+      } catch (_) {
+        statusEl.textContent = "Firefox заблокировал звук: разреши автозапуск аудио для сайта (значок слева в адресной строке) и нажми Play";
+        return;
+      }
+      playing = true; playBtn.textContent = "❚❚"; statusEl.textContent = ""; startLoop();
+      return;
     }
     const ctx = ensureCtx();
     await ctx.resume();
@@ -1067,5 +1076,5 @@
 
   bindDrop();
   updateOrientUI();
-  console.info("[fretboard] song analyzer build 10");
+  console.info("[fretboard] song analyzer build 11");
 })();
