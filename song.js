@@ -503,16 +503,21 @@
   }
 
   // Detect whether the notes around time t sit inside a single ~5-fret position (CAGED-ish box).
+  // Uses a tight window around "now" so a position change is picked up quickly; open strings
+  // (fret 0) are ignored since they don't pin a hand position.
   function detectBox(t) {
-    const win = [];
-    for (const n of arr.notes) {
-      if (n.t > t + 1.6) break;
-      if (n.t >= t - 2.4 && n.f > 0 && n.s >= 0 && n.s <= 5) win.push(n);
+    const frettedFrets = [];
+    let i = firstNoteIdx(t - 0.9);
+    if (i < 0) i = 0;
+    for (; i < arr.notes.length; i += 1) {
+      const n = arr.notes[i];
+      if (n.t > t + 1.3) break;
+      if (n.f > 0 && n.s >= 0 && n.s <= 5) frettedFrets.push(n.f);
     }
-    if (win.length < 3) return null;
-    let lo = 99, hi = -1;
-    for (const n of win) { lo = Math.min(lo, n.f); hi = Math.max(hi, n.f); }
-    if (hi - lo > 5) return null;
+    if (frettedFrets.length < 2) return null;
+    const lo = Math.min(...frettedFrets);
+    const hi = Math.max(...frettedFrets);
+    if (hi - lo > 5) return null; // spread across the neck — not a single position
     return { lo, hi };
   }
 
@@ -598,33 +603,22 @@
       }
     }
 
-    const { active, upcoming } = notesActiveAt(t);
+    const { active } = notesActiveAt(t);
     const r = clamp(Math.min(L.fw, L.gap) * 0.36, 10, 16);
 
-    // Upcoming notes: proximity shown by COLOR (cyan far -> orange near), constant size
-    for (const n of upcoming) {
-      if (n.s < 0 || n.s > 5) continue;
-      const prox = clamp(1 - (n.t - t) / LOOKAHEAD, 0, 1);
-      const x = xNote(L, n.f), y = yString(L, n.s);
-      const hue = 190 - prox * 165; // 190 (cyan) -> 25 (orange)
-      ctx.globalAlpha = 0.45 + prox * 0.45;
-      ctx.fillStyle = `hsl(${hue} 85% 55%)`;
-      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = "rgba(10,15,25,0.9)"; ctx.font = `700 ${r * 0.9}px Rajdhani, Segoe UI, sans-serif`;
-      ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(String(n.f), x, y);
-    }
-
-    // Active notes: bright gem + fret + technique glyph
+    // Only the notes sounding right now. Green = in the current scale, orange = outside it.
     for (const n of active) {
       if (n.s < 0 || n.s > 5) continue;
       const x = xNote(L, n.f), y = yString(L, n.s);
+      const inScale = scaleSet ? scaleSet.has(n.pc) : true;
+      const fill = inScale ? "#22c55e" : "#fb923c";
+      const glowC = inScale ? "rgba(34,197,94,0.85)" : "rgba(251,146,60,0.85)";
       const glow = ctx.createRadialGradient(x, y, 2, x, y, r + 18);
-      glow.addColorStop(0, "rgba(251,146,60,0.8)"); glow.addColorStop(1, "rgba(251,146,60,0)");
+      glow.addColorStop(0, glowC); glow.addColorStop(1, "rgba(0,0,0,0)");
       ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(x, y, r + 18, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = n.pm ? "#b45309" : "#fb923c"; ctx.strokeStyle = "#fff7ed"; ctx.lineWidth = 2.6;
+      ctx.fillStyle = fill; ctx.strokeStyle = "#fff7ed"; ctx.lineWidth = 2.6;
       ctx.beginPath(); ctx.arc(x, y, r + 3, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = "#111827"; ctx.font = `800 ${r + 1}px Rajdhani, Segoe UI, sans-serif`;
+      ctx.fillStyle = "#0b1220"; ctx.font = `800 ${r + 1}px Rajdhani, Segoe UI, sans-serif`;
       ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(String(n.f), x, y);
       const g = techGlyph(n);
       if (g) {
