@@ -42,11 +42,23 @@
   const densityCanvas = document.getElementById("densityCanvas");
   const sectionsEl = document.getElementById("sections");
   const playheadEl = document.getElementById("playhead");
+  const loopRegionEl = document.getElementById("loopRegion");
   const canvas = document.getElementById("songCanvas");
+  const highway = document.getElementById("highwayCanvas");
+  const sourceSel = document.getElementById("sourceSel");
+  const tempoSel = document.getElementById("tempoSel");
+  const loopAbtn = document.getElementById("loopAbtn");
+  const loopBbtn = document.getElementById("loopBbtn");
+  const loopSecBtn = document.getElementById("loopSecBtn");
+  const loopToggle = document.getElementById("loopToggle");
+  const loopClear = document.getElementById("loopClear");
+  const scaleRibbon = document.getElementById("scaleRibbon");
+  const scaleNowName = document.getElementById("scaleNowName");
+  const scaleStrip = document.getElementById("scaleStrip");
   const infoSection = document.getElementById("infoSection");
-  const infoScale = document.getElementById("infoScale");
   const infoNotes = document.getElementById("infoNotes");
   const infoBeat = document.getElementById("infoBeat");
+  const infoSource = document.getElementById("infoSource");
   const statusEl = document.getElementById("songStatus");
 
   let song = null;
@@ -71,15 +83,29 @@
   let amp = null;
   let voices = []; // { node, end }
   let distCurve = null;
+  let rate = 1;          // playback speed (1 = 100%)
+  let loopA = null;
+  let loopB = null;
+  let loopOn = false;
 
   function ensureCtx() {
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     return audioCtx;
   }
   function songTime() {
-    return playing ? startPos + (audioCtx.currentTime - startCtxTime) : pausedPos;
+    return playing ? startPos + (audioCtx.currentTime - startCtxTime) * rate : pausedPos;
   }
   function songLength() { return song ? song.length : 0; }
+
+  function reanchor() {
+    // call when changing rate or looping while playing
+    if (!playing) return;
+    startPos = clamp(songTime(), 0, songLength());
+    startCtxTime = audioCtx.currentTime;
+    stopVoices();
+    amp = buildAmp(audioCtx);
+    schedIdx = firstNoteIdx(startPos);
+  }
 
   function buildDistortion(amount) {
     const n = 44100;
@@ -188,11 +214,12 @@
 
   function scheduleAhead() {
     if (!playing) return;
-    const horizon = songTime() + SCHED_AHEAD;
+    const horizon = songTime() + SCHED_AHEAD * rate;
     const a = arr.notes;
-    while (schedIdx < a.length && a[schedIdx].t <= horizon) {
+    const limit = loopOn && loopB != null ? Math.min(horizon, loopB) : horizon;
+    while (schedIdx < a.length && a[schedIdx].t <= limit) {
       const n = a[schedIdx];
-      const when = startCtxTime + (n.t - startPos);
+      const when = startCtxTime + (n.t - startPos) / rate;
       if (when >= audioCtx.currentTime - 0.02) scheduleNote(n, Math.max(when, audioCtx.currentTime));
       schedIdx += 1;
     }
@@ -204,6 +231,41 @@
   }
 
   playBtn.addEventListener("click", () => { if (playing) pause(); else play(); });
+
+  function updateLoopUI() {
+    loopToggle.classList.toggle("is-on", loopOn);
+    loopToggle.setAttribute("aria-pressed", String(loopOn));
+    loopAbtn.classList.toggle("is-on", loopA != null);
+    loopBbtn.classList.toggle("is-on", loopB != null);
+    if (loopA != null && loopB != null && loopB > loopA && song) {
+      loopRegionEl.hidden = false;
+      loopRegionEl.style.left = `${(loopA / song.length) * 100}%`;
+      loopRegionEl.style.width = `${((loopB - loopA) / song.length) * 100}%`;
+    } else {
+      loopRegionEl.hidden = true;
+    }
+  }
+  function resetLoop() { loopA = null; loopB = null; loopOn = false; updateLoopUI(); }
+
+  tempoSel.addEventListener("change", () => { rate = parseFloat(tempoSel.value) || 1; reanchor(); renderFrame(); });
+
+  sourceSel.addEventListener("change", () => {
+    if (sourceSel.value !== "synth") { sourceSel.value = "synth"; return; }
+    infoSource.textContent = "Синтезатор";
+  });
+
+  loopAbtn.addEventListener("click", () => { loopA = songTime(); if (loopB != null && loopB <= loopA) loopB = null; updateLoopUI(); });
+  loopBbtn.addEventListener("click", () => { loopB = songTime(); if (loopA != null && loopA >= loopB) loopA = null; updateLoopUI(); });
+  loopSecBtn.addEventListener("click", () => {
+    const idx = currentSectionIndex(songTime());
+    if (idx < 0) return;
+    loopA = arr.sections[idx].t;
+    loopB = arr.sections[idx].end != null ? arr.sections[idx].end : songLength();
+    loopOn = true;
+    updateLoopUI();
+  });
+  loopToggle.addEventListener("click", () => { loopOn = !loopOn; updateLoopUI(); });
+  loopClear.addEventListener("click", resetLoop);
 
   // ============ Loading ============
   function bindDrop() {
@@ -255,6 +317,7 @@
       arrSelect.appendChild(opt);
     }
     arrSelect.value = song.arrangements.lead ? "lead" : Object.keys(song.arrangements)[0];
+    resetLoop();
     selectArrangement(arrSelect.value);
     timeTotalEl.textContent = fmtTime(song.length);
   }
@@ -270,8 +333,44 @@
     precomputeSectionScales();
     drawDensity();
     drawSections();
+    buildScaleRibbon();
     resizeCanvas();
     renderFrame();
+  }
+
+  function scaleColorFor(scale) {
+    if (!scale) return "hsl(0 0% 40%)";
+    const hue = (scale.root * 30 + (scale.name.includes("мажор") ? 0 : 200)) % 360;
+    return `hsl(${hue} 60% 62%)`;
+  }
+  function scaleShort(scale) {
+    if (!scale) return "—";
+    const short = scale.name
+      .replace("натуральный минор", "minor")
+      .replace("гармонический минор", "harm.min")
+      .replace("минорная пентатоника", "min.pent")
+      .replace("фригийский доминантный", "phryg.dom")
+      .replace("фригийский", "phrygian")
+      .replace("дорийский", "dorian")
+      .replace("мажор", "major");
+    return `${NOTE_NAMES_SHARP[scale.root]} ${short}`;
+  }
+
+  function buildScaleRibbon() {
+    scaleRibbon.innerHTML = "";
+    arr.sections.forEach((sec, i) => {
+      const end = sec.end != null ? sec.end : song.length;
+      const scale = arr._scales[i];
+      const seg = document.createElement("div");
+      seg.className = "ribbon-seg";
+      seg.dataset.idx = String(i);
+      seg.style.flexGrow = String(Math.max(0.0001, end - sec.t));
+      seg.style.background = scaleColorFor(scale);
+      seg.textContent = scaleShort(scale);
+      seg.title = `${sec.name}: ${scale ? NOTE_NAMES_SHARP[scale.root] + " " + scale.name : "—"}`;
+      seg.addEventListener("click", () => seek(sec.t));
+      scaleRibbon.appendChild(seg);
+    });
   }
 
   // ============ Scale detection ============
@@ -347,14 +446,22 @@
 
   // ============ Board rendering ============
   let cssW = 0, cssH = 0;
+  let hwW = 0, hwH = 0;
   function resizeCanvas() {
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
     const rect = canvas.getBoundingClientRect();
     cssW = Math.max(1, Math.floor(rect.width));
     cssH = Math.max(1, Math.floor(rect.height));
-    const dpr = Math.max(1, window.devicePixelRatio || 1);
     canvas.width = Math.floor(cssW * dpr);
     canvas.height = Math.floor(cssH * dpr);
     canvas.getContext("2d").setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    const hr = highway.getBoundingClientRect();
+    hwW = Math.max(1, Math.floor(hr.width));
+    hwH = Math.max(1, Math.floor(hr.height));
+    highway.width = Math.floor(hwW * dpr);
+    highway.height = Math.floor(hwH * dpr);
+    highway.getContext("2d").setTransform(dpr, 0, 0, dpr, 0, 0);
   }
   function layout() {
     const left = 54, right = cssW - 150, top = 46, bottom = cssH - 34;
@@ -453,14 +560,93 @@
     ctx.fillStyle = "#94a3b8"; ctx.font = "600 11px Rajdhani, Segoe UI, sans-serif"; ctx.textAlign = "center";
     for (let f = 1; f <= frets; f += 1) ctx.fillText(String(f), xNote(L, f), L.bottom + 16);
 
+    renderHighway(t);
     updateInfo(t, secIdx, scale, active);
     playheadEl.style.left = `${clamp(t / song.length, 0, 1) * 100}%`;
     timeNowEl.textContent = fmtTime(t);
   }
 
+  const HW_WINDOW = 2.6; // seconds of upcoming notes visible in the highway
+  function renderHighway(t) {
+    if (!hwW) return;
+    const ctx = highway.getContext("2d");
+    ctx.clearRect(0, 0, hwW, hwH);
+    const bg = ctx.createLinearGradient(0, 0, hwW, 0);
+    bg.addColorStop(0, "#0c1322"); bg.addColorStop(1, "#0a0f18");
+    ctx.fillStyle = bg; ctx.fillRect(0, 0, hwW, hwH);
+
+    const strikeX = 60;
+    const rowH = hwH / 6;
+    const trackW = hwW - strikeX - 10;
+    const yFor = (s) => (s + 0.5) * rowH;
+
+    // row guides + open string labels
+    for (let s = 0; s < 6; s += 1) {
+      const y = yFor(s);
+      ctx.strokeStyle = "rgba(148,163,184,0.18)";
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(strikeX, y); ctx.lineTo(hwW, y); ctx.stroke();
+      ctx.fillStyle = STRING_COLORS[s];
+      ctx.font = "700 11px Rajdhani, Segoe UI, sans-serif";
+      ctx.textAlign = "left"; ctx.textBaseline = "middle";
+      ctx.fillText(`${6 - s}`, 8, y);
+    }
+
+    // strike line
+    ctx.fillStyle = "rgba(255,124,34,0.85)";
+    ctx.fillRect(strikeX - 1, 0, 2, hwH);
+    ctx.fillStyle = "rgba(255,124,34,0.15)";
+    ctx.fillRect(strikeX - 8, 0, 8, hwH);
+
+    const a = arr.notes;
+    let i = firstNoteIdx(t - 0.25);
+    for (; i < a.length; i += 1) {
+      const n = a[i];
+      if (n.t > t + HW_WINDOW) break;
+      if (n.s < 0 || n.s > 5) continue;
+      const x = strikeX + ((n.t - t) / HW_WINDOW) * trackW;
+      const lenPx = clamp((Math.max(n.sus, 0.08) / HW_WINDOW) * trackW, 8, trackW);
+      const y = yFor(n.s);
+      const h = rowH * 0.62;
+      const hit = Math.abs(n.t - t) < 0.06;
+      ctx.globalAlpha = n.pm ? 0.6 : 1;
+      ctx.fillStyle = STRING_COLORS[n.s];
+      roundRect(ctx, x, y - h / 2, lenPx, h, 5);
+      ctx.fill();
+      if (hit) {
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = "#fde68a"; ctx.lineWidth = 2.5; ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+      // fret label on the head
+      ctx.fillStyle = "#0b1220";
+      ctx.font = "700 12px Rajdhani, Segoe UI, sans-serif";
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      if (lenPx > 14) ctx.fillText(String(n.f), x + Math.min(lenPx / 2, 12), y);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function roundRect(ctx, x, y, w, h, r) {
+    const rr = Math.min(r, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + rr, y);
+    ctx.arcTo(x + w, y, x + w, y + h, rr);
+    ctx.arcTo(x + w, y + h, x, y + h, rr);
+    ctx.arcTo(x, y + h, x, y, rr);
+    ctx.arcTo(x, y, x + w, y, rr);
+    ctx.closePath();
+  }
+
+  let ribbonCurrent = -1;
   function updateInfo(t, secIdx, scale, active) {
     infoSection.textContent = secIdx >= 0 ? arr.sections[secIdx].name : "—";
-    infoScale.textContent = scale ? `${NOTE_NAMES_SHARP[scale.root]} ${scale.name} (${Math.round(scale.coverage * 100)}%)` : "—";
+    scaleNowName.textContent = scale ? `${NOTE_NAMES_SHARP[scale.root]} ${scale.name} (${Math.round(scale.coverage * 100)}%)` : "—";
+    renderScaleStrip(scale, active);
+    if (secIdx !== ribbonCurrent) {
+      ribbonCurrent = secIdx;
+      Array.from(scaleRibbon.children).forEach((el, i) => el.classList.toggle("is-current", i === secIdx));
+    }
     if (active.length) {
       const chord = active.find((n) => n.chord);
       if (chord && chord.chord) infoNotes.textContent = chord.chord;
@@ -475,12 +661,52 @@
     infoBeat.textContent = `${measure != null ? "такт " + measure : "—"} · ${Math.round(arr.tempo)} BPM`;
   }
 
+  let stripSig = "";
+  let scaleCells = [];
+  function renderScaleStrip(scale, active) {
+    const sig = scale ? scale.root + "|" + scale.name : "none";
+    if (sig !== stripSig) {
+      stripSig = sig;
+      scaleStrip.innerHTML = "";
+      scaleCells = [];
+      const inSet = scale ? new Set(DETECT_SCALES.find((s) => s.name === scale.name).ivals.map((iv) => (scale.root + iv) % 12)) : null;
+      for (let pc = 0; pc < 12; pc += 1) {
+        const cell = document.createElement("div");
+        cell.className = "scale-cell";
+        const note = document.createElement("span");
+        note.textContent = NOTE_NAMES_SHARP[pc];
+        cell.appendChild(note);
+        if (inSet && inSet.has(pc)) {
+          cell.classList.add("in-scale");
+          if (pc === scale.root) cell.classList.add("is-root");
+          const deg = document.createElement("span");
+          deg.className = "deg";
+          deg.textContent = DEGREE_LABELS[((pc - scale.root) % 12 + 12) % 12];
+          cell.appendChild(deg);
+        }
+        scaleStrip.appendChild(cell);
+        scaleCells.push(cell);
+      }
+    }
+    const playing = new Set(active.map((n) => n.pc));
+    for (let pc = 0; pc < 12; pc += 1) scaleCells[pc].classList.toggle("playing", playing.has(pc));
+  }
+
   // ============ Loop ============
   function loop() {
     if (!songTabActive) { rafId = null; return; }
     if (playing) {
+      const t = songTime();
+      if (loopOn && loopA != null && loopB != null && loopB > loopA && t >= loopB) {
+        seek(loopA);
+        rafId = requestAnimationFrame(loop);
+        return;
+      }
       scheduleAhead();
-      if (songTime() >= songLength()) { pause(); pausedPos = songLength(); renderFrame(); return; }
+      if (t >= songLength()) {
+        if (loopOn && loopA != null) { seek(loopA); rafId = requestAnimationFrame(loop); return; }
+        pause(); pausedPos = songLength(); renderFrame(); return;
+      }
     }
     renderFrame();
     if (playing || dragging) rafId = requestAnimationFrame(loop);

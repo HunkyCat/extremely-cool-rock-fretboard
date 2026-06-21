@@ -150,20 +150,60 @@
           <div id="timeline" class="timeline" role="slider" aria-label="Позиция в песне" tabindex="0">
             <canvas id="densityCanvas" class="density"></canvas>
             <div id="sections" class="sections"></div>
+            <div id="loopRegion" class="loop-region" hidden></div>
             <div id="playhead" class="playhead"></div>
           </div>
           <span id="timeTotal" class="time">0:00</span>
         </div>
 
+        <div class="transport transport2">
+          <div class="ctl-group">
+            <span class="ctl-label">Звук</span>
+            <select id="sourceSel">
+              <option value="synth">Синтезатор</option>
+              <option value="original" disabled>Оригинал (скоро)</option>
+            </select>
+          </div>
+          <div class="ctl-group">
+            <span class="ctl-label">Темп</span>
+            <select id="tempoSel">
+              <option value="1">100%</option>
+              <option value="0.75">75%</option>
+              <option value="0.5">50%</option>
+              <option value="0.35">35%</option>
+              <option value="0.25">25%</option>
+            </select>
+          </div>
+          <div class="ctl-group">
+            <span class="ctl-label">Петля</span>
+            <button id="loopAbtn" class="riff-btn small" type="button" title="Точка A">A</button>
+            <button id="loopBbtn" class="riff-btn small" type="button" title="Точка B">B</button>
+            <button id="loopSecBtn" class="riff-btn small" type="button" title="Зациклить текущую секцию">Секция</button>
+            <button id="loopToggle" class="riff-btn small" type="button" aria-pressed="false" title="Вкл/выкл петлю">⟲</button>
+            <button id="loopClear" class="riff-btn small" type="button" title="Сбросить петлю">✕</button>
+          </div>
+        </div>
+
+        <div id="scaleRibbon" class="scale-ribbon" aria-label="Гаммы по секциям"></div>
+
         <div class="song-board-wrap">
+          <canvas id="highwayCanvas" class="highway" aria-label="Подлёт нот"></canvas>
           <canvas id="songCanvas" aria-label="Гриф: разбор песни"></canvas>
+        </div>
+
+        <div class="scale-panel">
+          <div class="scale-now">
+            <span class="info-k">Гамма сейчас</span>
+            <b id="scaleNowName">—</b>
+          </div>
+          <div id="scaleStrip" class="scale-strip"></div>
         </div>
 
         <div class="song-info">
           <div class="info-cell"><span class="info-k">Секция</span><b id="infoSection">—</b></div>
-          <div class="info-cell"><span class="info-k">Гамма</span><b id="infoScale">—</b></div>
           <div class="info-cell"><span class="info-k">Сейчас звучит</span><b id="infoNotes">—</b></div>
           <div class="info-cell"><span class="info-k">Такт · BPM</span><b id="infoBeat">—</b></div>
+          <div class="info-cell"><span class="info-k">Источник</span><b id="infoSource">Синтезатор</b></div>
         </div>
         <p id="songStatus" class="status" aria-live="polite"></p>
       </section>
