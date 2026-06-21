@@ -54,7 +54,9 @@
   const fretsInput = document.getElementById("frets");
   const labelsSelect = document.getElementById("labels");
   const boardInvertBtn = document.getElementById("boardInvert");
+  const boardVolume = document.getElementById("boardVolume");
   let invertBoard = false;
+  let clickVolume = 0.9;
   const statusEl = document.getElementById("status");
   const modeHintEl = document.getElementById("modeHint");
   const controlsPanel = document.getElementById("controlsPanel");
@@ -113,6 +115,7 @@
         frets: fretsInput.value,
         labels: labelsSelect.value,
         invertBoard,
+        clickVolume,
       };
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     } catch (_ignored) {
@@ -147,6 +150,10 @@
       invertBoard = data.invertBoard;
       boardInvertBtn.classList.toggle("is-on", invertBoard);
       boardInvertBtn.title = invertBoard ? "1→6 (тонкая сверху)" : "6→1 (толстая сверху)";
+    }
+    if (typeof data.clickVolume === "number") {
+      clickVolume = clamp(data.clickVolume, 0, 1);
+      boardVolume.value = String(Math.round(clickVolume * 100));
     }
   }
 
@@ -1174,7 +1181,7 @@
     const midi = state.openMidis[stringIndex] + fret;
     if (window.Instruments) {
       const out = ctx.createGain();
-      out.gain.value = 0.9;
+      out.gain.value = clickVolume;
       out.connect(ctx.destination);
       window.Instruments.playNote(ctx, out, { freq: midiToFrequency(midi), when: ctx.currentTime + 0.02, dur: 0.5, accent: true }, window.CurrentInstrument || "eguitar");
       setTimeout(() => { try { out.disconnect(); } catch (_ignored) {} }, 3500);
@@ -1297,6 +1304,11 @@
     boardInvertBtn.title = invertBoard ? "1→6 (тонкая сверху)" : "6→1 (толстая сверху)";
     saveSettings();
     scheduleRender();
+  });
+
+  boardVolume.addEventListener("input", () => {
+    clickVolume = clamp((parseInt(boardVolume.value, 10) || 0) / 100, 0, 1);
+    saveSettings();
   });
 
   customTuningInput.addEventListener("input", () => { saveSettings(); scheduleRender(); });

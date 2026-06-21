@@ -1314,5 +1314,5 @@
     ro.observe(canvas);
   }
 
-  console.info("[fretboard] song analyzer build 21");
+  console.info("[fretboard] song analyzer build 22");
 })();
