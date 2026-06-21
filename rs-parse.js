@@ -292,7 +292,16 @@
     if (!meta || Object.keys(arrangements).length === 0) {
       throw new Error("Не удалось разобрать партии из psarc");
     }
-    return { ...meta, arrangements };
+
+    // Extract the main song audio (.wem) so the player can offer the real track.
+    let audioWem = null;
+    const wemNames = arc.names.filter((n) => n.endsWith(".wem"));
+    if (wemNames.length) {
+      const mainWem = wemNames.reduce((a, b) => (arc.files[b].length > arc.files[a].length ? b : a));
+      audioWem = await arc.extract(arc.files[mainWem]);
+    }
+
+    return { ...meta, arrangements, audioWem };
   }
 
   window.RSParse = { parsePsarc, readPsarc };

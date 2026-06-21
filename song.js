@@ -103,14 +103,71 @@
   let loopB = null;
   let loopOn = false;
 
+  // Real-track ("original") source: decode the .wem -> Ogg in-browser, play via <audio>.
+  let source = "synth";  // "synth" | "original"
+  let audioEl = null;
+  let oggUrl = null;
+  let originalReady = false;
+  let codebooksPromise = null;
+
   function ensureCtx() {
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     return audioCtx;
   }
   function songTime() {
+    if (source === "original" && audioEl) return audioEl.currentTime;
     return playing ? startPos + (audioCtx.currentTime - startCtxTime) * rate : pausedPos;
   }
   function songLength() { return song ? song.length : 0; }
+
+  function fetchCodebooks() {
+    if (!codebooksPromise) {
+      codebooksPromise = fetch("./packed_codebooks_aoTuV_603.bin")
+        .then((r) => r.arrayBuffer()).then((b) => new Uint8Array(b));
+    }
+    return codebooksPromise;
+  }
+
+  function resetOriginal() {
+    originalReady = false;
+    if (audioEl) { try { audioEl.pause(); } catch (_) {} audioEl = null; }
+    if (oggUrl) { URL.revokeObjectURL(oggUrl); oggUrl = null; }
+    source = "synth";
+    sourceSel.value = "synth";
+    infoSource.textContent = "Синтезатор";
+  }
+
+  async function ensureOriginal() {
+    if (originalReady) return true;
+    if (!song || !song.audioWem) { statusEl.textContent = "В этом psarc нет аудиодорожки"; return false; }
+    if (!window.WemToOgg) { statusEl.textContent = "Конвертер аудио не загружен"; return false; }
+    statusEl.textContent = "Декодирую оригинал… (несколько секунд)";
+    try {
+      const cb = await fetchCodebooks();
+      const ogg = window.WemToOgg.convert(song.audioWem, cb);
+      const blob = new Blob([ogg], { type: "audio/ogg" });
+      oggUrl = URL.createObjectURL(blob);
+      audioEl = new Audio();
+      audioEl.src = oggUrl;
+      audioEl.preservesPitch = true;
+      audioEl.playbackRate = rate;
+      await new Promise((res, rej) => {
+        audioEl.addEventListener("loadedmetadata", res, { once: true });
+        audioEl.addEventListener("error", () => rej(new Error("decode failed")), { once: true });
+        setTimeout(res, 8000);
+      });
+      audioEl.addEventListener("ended", () => {
+        if (loopOn && loopA != null) { audioEl.currentTime = loopA; audioEl.play(); return; }
+        playing = false; playBtn.textContent = "▶";
+      });
+      originalReady = true;
+      statusEl.textContent = "";
+      return true;
+    } catch (e) {
+      statusEl.textContent = "Не удалось декодировать оригинал: " + e.message;
+      return false;
+    }
+  }
 
   function reanchor() {
     // call when changing rate or looping while playing
@@ -195,6 +252,13 @@
 
   async function play() {
     if (!arr || playing) return;
+    if (source === "original" && audioEl) {
+      if (audioEl.currentTime >= songLength() - 0.05) audioEl.currentTime = 0;
+      audioEl.playbackRate = rate;
+      audioEl.preservesPitch = true;
+      try { await audioEl.play(); } catch (_) { statusEl.textContent = "Браузер заблокировал аудио — нажми ещё раз"; return; }
+      playing = true; playBtn.textContent = "❚❚"; startLoop(); return;
+    }
     const ctx = ensureCtx();
     await ctx.resume();
     if (pausedPos >= songLength() - 0.05) pausedPos = 0;
@@ -208,6 +272,9 @@
   }
   function pause() {
     if (!playing) return;
+    if (source === "original" && audioEl) {
+      audioEl.pause(); playing = false; playBtn.textContent = "▶"; return;
+    }
     pausedPos = clamp(songTime(), 0, songLength());
     playing = false;
     stopVoices();
@@ -215,6 +282,7 @@
   }
   function seek(t) {
     t = clamp(t, 0, songLength());
+    if (source === "original" && audioEl) { audioEl.currentTime = t; renderFrame(); return; }
     if (playing) {
       stopVoices();
       amp = buildAmp(audioCtx);
@@ -262,11 +330,31 @@
   }
   function resetLoop() { loopA = null; loopB = null; loopOn = false; updateLoopUI(); }
 
-  tempoSel.addEventListener("change", () => { rate = parseFloat(tempoSel.value) || 1; reanchor(); renderFrame(); });
+  tempoSel.addEventListener("change", () => {
+    rate = parseFloat(tempoSel.value) || 1;
+    if (source === "original" && audioEl) { audioEl.playbackRate = rate; audioEl.preservesPitch = true; }
+    else reanchor();
+    renderFrame();
+  });
 
-  sourceSel.addEventListener("change", () => {
-    if (sourceSel.value !== "synth") { sourceSel.value = "synth"; return; }
-    infoSource.textContent = "Синтезатор";
+  sourceSel.addEventListener("change", async () => {
+    const want = sourceSel.value;
+    const wasPlaying = playing;
+    const t = songTime();
+    pause();
+    if (want === "original") {
+      const ok = await ensureOriginal();
+      if (!ok) { sourceSel.value = "synth"; source = "synth"; infoSource.textContent = "Синтезатор"; return; }
+      source = "original";
+      infoSource.textContent = "Оригинал";
+      audioEl.currentTime = clamp(t, 0, songLength());
+    } else {
+      source = "synth";
+      infoSource.textContent = "Синтезатор";
+      pausedPos = clamp(t, 0, songLength());
+    }
+    if (wasPlaying) play();
+    renderFrame();
   });
 
   loopAbtn.addEventListener("click", () => { loopA = songTime(); if (loopB != null && loopB <= loopA) loopB = null; updateLoopUI(); });
@@ -312,6 +400,7 @@
       const buf = await file.arrayBuffer();
       song = await window.RSParse.parsePsarc(buf);
       pause();
+      resetOriginal();
       pausedPos = 0;
       buildSong();
       songTab.classList.add("song-loaded");
@@ -812,10 +901,12 @@
         rafId = requestAnimationFrame(loop);
         return;
       }
-      scheduleAhead();
-      if (t >= songLength()) {
-        if (loopOn && loopA != null) { seek(loopA); rafId = requestAnimationFrame(loop); return; }
-        pause(); pausedPos = songLength(); renderFrame(); return;
+      if (source === "synth") {
+        scheduleAhead();
+        if (t >= songLength()) {
+          if (loopOn && loopA != null) { seek(loopA); rafId = requestAnimationFrame(loop); return; }
+          pause(); pausedPos = songLength(); renderFrame(); return;
+        }
       }
     }
     renderFrame();
