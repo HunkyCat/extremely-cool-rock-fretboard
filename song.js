@@ -111,6 +111,7 @@
   let audioEl = null;
   let oggUrl = null;
   let originalReady = false;
+  let originalPromise = null;
   let codebooksPromise = null;
   let preservePitch = true;
   // smooth-clock interpolation for <audio> (its currentTime updates in coarse steps)
@@ -153,6 +154,7 @@
 
   function resetOriginal() {
     originalReady = false;
+    originalPromise = null;
     if (audioEl) { try { audioEl.pause(); } catch (_) {} audioEl = null; }
     if (oggUrl) { URL.revokeObjectURL(oggUrl); oggUrl = null; }
     source = "synth";
@@ -160,36 +162,41 @@
     infoSource.textContent = "Синтезатор";
   }
 
-  async function ensureOriginal() {
-    if (originalReady) return true;
-    if (!song || !song.audioWem) { statusEl.textContent = "В этом psarc нет аудиодорожки"; return false; }
-    if (!window.WemToOgg) { statusEl.textContent = "Конвертер аудио не загружен"; return false; }
+  function ensureOriginal() {
+    if (originalReady) return Promise.resolve(true);
+    if (originalPromise) return originalPromise;
+    if (!song || !song.audioWem) { statusEl.textContent = "В этом psarc нет аудиодорожки"; return Promise.resolve(false); }
+    if (!window.WemToOgg) { statusEl.textContent = "Конвертер аудио не загружен"; return Promise.resolve(false); }
     statusEl.textContent = "Декодирую оригинал… (несколько секунд)";
-    try {
-      const cb = await fetchCodebooks();
-      const ogg = window.WemToOgg.convert(song.audioWem, cb);
-      const blob = new Blob([ogg], { type: "audio/ogg" });
-      oggUrl = URL.createObjectURL(blob);
-      audioEl = new Audio();
-      audioEl.src = oggUrl;
-      audioEl.preservesPitch = preservePitch;
-      audioEl.playbackRate = rate;
-      await new Promise((res, rej) => {
-        audioEl.addEventListener("loadedmetadata", res, { once: true });
-        audioEl.addEventListener("error", () => rej(new Error("decode failed")), { once: true });
-        setTimeout(res, 8000);
-      });
-      audioEl.addEventListener("ended", () => {
-        if (loopOn && loopA != null) { audioEl.currentTime = loopA; audioEl.play(); return; }
-        playing = false; playBtn.textContent = "▶";
-      });
-      originalReady = true;
-      statusEl.textContent = "";
-      return true;
-    } catch (e) {
-      statusEl.textContent = "Не удалось декодировать оригинал: " + e.message;
-      return false;
-    }
+    originalPromise = (async () => {
+      try {
+        const cb = await fetchCodebooks();
+        const ogg = window.WemToOgg.convert(song.audioWem, cb);
+        const blob = new Blob([ogg], { type: "audio/ogg" });
+        oggUrl = URL.createObjectURL(blob);
+        audioEl = new Audio();
+        audioEl.src = oggUrl;
+        audioEl.preservesPitch = preservePitch;
+        audioEl.playbackRate = rate;
+        await new Promise((res, rej) => {
+          audioEl.addEventListener("loadedmetadata", res, { once: true });
+          audioEl.addEventListener("error", () => rej(new Error("decode failed")), { once: true });
+          setTimeout(res, 8000);
+        });
+        audioEl.addEventListener("ended", () => {
+          if (loopOn && loopA != null) { audioEl.currentTime = loopA; audioEl.play(); return; }
+          playing = false; playBtn.textContent = "▶";
+        });
+        originalReady = true;
+        statusEl.textContent = "";
+        return true;
+      } catch (e) {
+        statusEl.textContent = "Не удалось декодировать оригинал: " + e.message;
+        originalPromise = null; // allow retry
+        return false;
+      }
+    })();
+    return originalPromise;
   }
 
   function reanchor() {
@@ -275,7 +282,12 @@
 
   async function play() {
     if (!arr || playing) return;
-    if (source === "original" && audioEl) {
+    if (source === "original") {
+      if (!originalReady) {
+        const ok = await ensureOriginal();
+        if (!ok || source !== "original" || playing) return; // failed, switched away, or already started
+      }
+      if (!audioEl) return;
       if (audioEl.currentTime >= songLength() - 0.05) audioEl.currentTime = 0;
       audioEl.playbackRate = rate;
       audioEl.preservesPitch = preservePitch;
@@ -371,17 +383,24 @@
     const t = songTime();
     pause();
     if (want === "original") {
-      const ok = await ensureOriginal();
-      if (!ok) { sourceSel.value = "synth"; source = "synth"; infoSource.textContent = "Синтезатор"; return; }
-      source = "original";
+      source = "original";                 // switch immediately so Play won't fall back to synth
       infoSource.textContent = "Оригинал";
+      const ok = await ensureOriginal();
+      if (!ok) {                           // decode failed -> fall back to synth
+        source = "synth"; sourceSel.value = "synth"; infoSource.textContent = "Синтезатор";
+        pausedPos = clamp(t, 0, songLength());
+        if (wasPlaying) play();
+        return;
+      }
+      if (source !== "original") return;   // user switched back while decoding
       audioEl.currentTime = clamp(t, 0, songLength());
+      if (wasPlaying) play();
     } else {
       source = "synth";
       infoSource.textContent = "Синтезатор";
       pausedPos = clamp(t, 0, songLength());
+      if (wasPlaying) play();
     }
-    if (wasPlaying) play();
     renderFrame();
   });
 
