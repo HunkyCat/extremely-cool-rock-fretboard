@@ -28,6 +28,12 @@
   </div>
 
   <main class="app-shell">
+    <nav class="tabs" role="tablist">
+      <button class="tab is-active" type="button" data-tab="fretboard" role="tab" aria-selected="true">Гриф</button>
+      <button class="tab" type="button" data-tab="song" role="tab" aria-selected="false">Разбор песни</button>
+    </nav>
+
+    <div id="tab-fretboard" class="tab-panel is-active" role="tabpanel">
     <header class="panel topbar">
       <h1>MY GUITAR FRETBOARD</h1>
       <div class="top-actions">
@@ -108,8 +114,64 @@
         </div>
       </section>
     </section>
+    </div>
+
+    <div id="tab-song" class="tab-panel" role="tabpanel" hidden>
+      <div id="dropZone" class="panel drop-zone">
+        <div class="drop-inner">
+          <div class="drop-icon">🎸</div>
+          <h2>Перетащи сюда <b>.psarc</b> файл</h2>
+          <p>Или <button id="fileBtn" type="button" class="riff-btn">выбери файл</button></p>
+          <input id="fileInput" type="file" accept=".psarc" hidden>
+          <p class="drop-note">Файл обрабатывается прямо в браузере — ничего не загружается на сервер и нигде не сохраняется. Подходит Rocksmith 2014 CDLC (с XML-партиями).</p>
+          <p id="dropStatus" class="status" aria-live="polite"></p>
+        </div>
+      </div>
+
+      <header class="panel song-header">
+        <div class="song-id">
+          <h2 id="songTitle">—</h2>
+          <span id="songMeta" class="song-meta"></span>
+        </div>
+        <div class="song-controls">
+          <div class="field">
+            <label for="arrSelect">Партия</label>
+            <select id="arrSelect" name="arrSelect"></select>
+          </div>
+          <span id="songTuning" class="song-tuning"></span>
+          <button id="reloadBtn" type="button" class="riff-btn" title="Загрузить другой psarc">Другой файл</button>
+        </div>
+      </header>
+
+      <section class="panel song-stage">
+        <div class="transport">
+          <button id="playBtn" class="riff-btn play-btn" type="button" aria-label="Играть">▶</button>
+          <span id="timeNow" class="time">0:00</span>
+          <div id="timeline" class="timeline" role="slider" aria-label="Позиция в песне" tabindex="0">
+            <canvas id="densityCanvas" class="density"></canvas>
+            <div id="sections" class="sections"></div>
+            <div id="playhead" class="playhead"></div>
+          </div>
+          <span id="timeTotal" class="time">0:00</span>
+        </div>
+
+        <div class="song-board-wrap">
+          <canvas id="songCanvas" aria-label="Гриф: разбор песни"></canvas>
+        </div>
+
+        <div class="song-info">
+          <div class="info-cell"><span class="info-k">Секция</span><b id="infoSection">—</b></div>
+          <div class="info-cell"><span class="info-k">Гамма</span><b id="infoScale">—</b></div>
+          <div class="info-cell"><span class="info-k">Сейчас звучит</span><b id="infoNotes">—</b></div>
+          <div class="info-cell"><span class="info-k">Такт · BPM</span><b id="infoBeat">—</b></div>
+        </div>
+        <p id="songStatus" class="status" aria-live="polite"></p>
+      </section>
+    </div>
   </main>
 
   <script src="./app.js"></script>
+  <script src="./rs-parse.js"></script>
+  <script src="./song.js"></script>
 </body>
 </html>
