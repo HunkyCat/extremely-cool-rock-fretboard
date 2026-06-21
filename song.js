@@ -117,6 +117,9 @@
   let source = "synth";  // "synth" | "original"
   let audioBuffer = null;
   let stNode = null, stGain = null, stFilter = null, stPipe = null, stSource = null;
+  let stSourceSec = 0;   // actual source position reported by SoundTouch (seconds)
+  let stCbPerf = 0;      // performance.now() at that report (for smooth interpolation)
+  const ST_BUFFER = 8192; // bigger script-processor buffer => fewer underrun clicks
   let originalReady = false;
   let originalPromise = null;
   let codebooksPromise = null;
@@ -128,7 +131,16 @@
     return audioCtx;
   }
   function songTime() {
-    return playing ? startPos + (audioCtx.currentTime - startCtxTime) * rate : pausedPos;
+    if (!playing) return pausedPos;
+    if (source === "original") {
+      if (!stFilter) return pausedPos;
+      // Follow the actual audio position SoundTouch reports, interpolated between
+      // callbacks; subtract output latency so the tabs line up with what's heard.
+      const sr = audioBuffer ? audioBuffer.sampleRate : 48000;
+      const lat = ((ST_BUFFER * 0.5) / sr + (audioCtx.outputLatency || audioCtx.baseLatency || 0.02)) * rate;
+      return clamp(stSourceSec - lat + ((performance.now() - stCbPerf) / 1000) * rate, 0, songLength());
+    }
+    return startPos + (audioCtx.currentTime - startCtxTime) * rate;
   }
   function songLength() { return song ? song.length : 0; }
 
@@ -185,21 +197,35 @@
     if (!audioBuffer || !window.SoundTouchLib) return;
     const ctx = audioCtx;
     const ST = window.SoundTouchLib;
+    const sr = audioBuffer.sampleRate;
+    fromPos = clamp(fromPos, 0, songLength());
     stSource = new ST.WebAudioBufferSource(audioBuffer);
     stPipe = new ST.SoundTouch();
     applyStRate();
     stFilter = new ST.SimpleFilter(stSource, stPipe);
-    stFilter.sourcePosition = Math.floor(clamp(fromPos, 0, songLength()) * audioBuffer.sampleRate);
-    stNode = ST.getWebAudioNode(ctx, stFilter);
+    stFilter.sourcePosition = Math.floor(fromPos * sr);
+    stSourceSec = fromPos;
+    stCbPerf = performance.now();
+    stNode = ST.getWebAudioNode(ctx, stFilter, (pos) => {
+      stSourceSec = pos / sr;
+      stCbPerf = performance.now();
+    }, ST_BUFFER);
     stGain = ctx.createGain();
-    stGain.gain.value = volume;
+    stGain.gain.setValueAtTime(0.0001, ctx.currentTime);
+    stGain.gain.exponentialRampToValueAtTime(Math.max(0.0002, volume), ctx.currentTime + 0.02);
     stNode.connect(stGain);
     stGain.connect(ctx.destination);
   }
   function stopOriginal() {
-    if (stNode) { try { stNode.disconnect(); } catch (_) {} stNode = null; }
-    if (stGain) { try { stGain.disconnect(); } catch (_) {} stGain = null; }
-    stFilter = null; stSource = null; stPipe = null;
+    const node = stNode, gain = stGain;
+    stNode = null; stGain = null; stFilter = null; stSource = null; stPipe = null;
+    if (gain && audioCtx) {
+      try { gain.gain.cancelScheduledValues(audioCtx.currentTime); gain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.008); } catch (_) {}
+    }
+    setTimeout(() => {
+      if (node) { try { node.disconnect(); } catch (_) {} }
+      if (gain) { try { gain.disconnect(); } catch (_) {} }
+    }, 60);
   }
 
   function reanchor() {
@@ -1312,5 +1338,5 @@
     ro.observe(canvas);
   }
 
-  console.info("[fretboard] song analyzer build 17");
+  console.info("[fretboard] song analyzer build 18");
 })();
