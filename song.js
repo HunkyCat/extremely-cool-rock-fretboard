@@ -463,9 +463,6 @@
       resizeCanvas();
       renderFrame();
       dropStatus.textContent = "";
-      // Pre-decode the real track in the background so "Оригинал" is ready
-      // before the user presses Play (avoids the autoplay-gesture race).
-      ensureOriginal(true).catch(() => {});
     } catch (err) {
       dropStatus.textContent = "Не удалось разобрать: " + err.message;
     }
@@ -1076,5 +1073,5 @@
 
   bindDrop();
   updateOrientUI();
-  console.info("[fretboard] song analyzer build 11");
+  console.info("[fretboard] song analyzer build 12");
 })();
