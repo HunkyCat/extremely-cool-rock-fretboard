@@ -241,6 +241,27 @@
     }
     notes.sort((a, b) => a.t - b.t || a.s - b.s);
 
+    // Derive measures + time signature from the beat grid (RS has no explicit time sig).
+    // A beat with measure>=0 is a downbeat; following measure==null beats belong to it.
+    const measures = [];
+    for (let i = 0; i < beats.length; i += 1) {
+      if (beats[i].measure == null) continue;
+      let cnt = 1;
+      let j = i + 1;
+      while (j < beats.length && beats[j].measure == null) { cnt += 1; j += 1; }
+      measures.push({ measure: beats[i].measure, t: beats[i].t, beats: cnt });
+    }
+    const freq = {};
+    for (const m of measures) freq[m.beats] = (freq[m.beats] || 0) + 1;
+    let domBeats = 4;
+    let domN = 0;
+    for (const k in freq) if (freq[k] > domN) { domN = freq[k]; domBeats = +k; }
+
+    // Which techniques this arrangement uses (from arrangementProperties flags).
+    const ap = root.querySelector(":scope > arrangementProperties");
+    const props = {};
+    if (ap) for (const a of Array.from(ap.attributes)) props[a.name] = a.value === "1";
+
     return {
       arrangement: get("arrangement"),
       tuningOffsets: offsets,
@@ -248,10 +269,14 @@
       tuningName: tuningName(offsets),
       openMidi,
       tempo: r3(num(get("averageTempo"), 120)),
+      centOffset: r3(num(get("centOffset"))),
       beats,
+      measures,
+      timeSig: { num: domBeats, den: 4 },
       sections,
       notes,
       noteCount: notes.length,
+      props,
     };
   }
 
@@ -270,11 +295,13 @@
     let meta = null;
     const arrangements = {};
     for (const name of xmlNames) {
+      if (name.includes("vocal")) continue; // vocals XML is a different schema, not an instrument part
       const bytes = await arc.extract(arc.files[name]);
       const text = new TextDecoder("utf-8").decode(bytes);
       const doc = parser.parseFromString(text, "application/xml");
       if (doc.querySelector("parsererror")) continue;
       const rootEl = doc.documentElement;
+      if (rootEl.tagName.toLowerCase() !== "song") continue; // skip non-instrument arrangements
       if (!meta) {
         meta = {
           title: rootEl.querySelector(":scope > title")?.textContent || "—",

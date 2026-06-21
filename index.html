@@ -7,7 +7,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta name="description" content="Interactive guitar fretboard visualizer with scale, tuning, and CAGED mode support.">
   <title>My Guitar Fretboard</title>
-  <link rel="stylesheet" href="./styles.css?v=5">
+  <link rel="stylesheet" href="./styles.css?v=6">
 </head>
 <body>
   <div class="world-layer" aria-hidden="true">
@@ -99,6 +99,11 @@
               <option value="degree">Ступени</option>
             </select>
           </div>
+
+          <div class="field">
+            <label for="boardInvert">Ориентация</label>
+            <button id="boardInvert" type="button" class="riff-btn small">Инвертировать (для ебанутых)</button>
+          </div>
         </div>
 
         <p class="hint">Клик по грифу — сыграть ноту.</p>
@@ -134,6 +139,7 @@
         <div class="song-id">
           <h2 id="songTitle">—</h2>
           <span id="songMeta" class="song-meta"></span>
+          <span id="songProps" class="song-props"></span>
         </div>
         <div class="song-controls">
           <div class="field">
@@ -227,9 +233,9 @@
     </div>
   </main>
 
-  <script src="./app.js?v=5"></script>
-  <script src="./rs-parse.js?v=5"></script>
-  <script src="./wem2ogg.js?v=5"></script>
-  <script src="./song.js?v=5"></script>
+  <script src="./app.js?v=6"></script>
+  <script src="./rs-parse.js?v=6"></script>
+  <script src="./wem2ogg.js?v=6"></script>
+  <script src="./song.js?v=6"></script>
 </body>
 </html>

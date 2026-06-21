@@ -53,6 +53,8 @@
   const cagedStageSelect = document.getElementById("caged_stage");
   const fretsInput = document.getElementById("frets");
   const labelsSelect = document.getElementById("labels");
+  const boardInvertBtn = document.getElementById("boardInvert");
+  let invertBoard = false;
   const statusEl = document.getElementById("status");
   const modeHintEl = document.getElementById("modeHint");
   const controlsPanel = document.getElementById("controlsPanel");
@@ -110,6 +112,7 @@
         cagedStage: cagedStageSelect.value,
         frets: fretsInput.value,
         labels: labelsSelect.value,
+        invertBoard,
       };
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     } catch (_ignored) {
@@ -140,6 +143,11 @@
     setIfValid(labelsSelect, data.labels);
     if (typeof data.custom === "string") customTuningInput.value = data.custom;
     if (data.frets != null) fretsInput.value = String(clampFrets(data.frets));
+    if (typeof data.invertBoard === "boolean") {
+      invertBoard = data.invertBoard;
+      boardInvertBtn.classList.toggle("is-on", invertBoard);
+      boardInvertBtn.title = invertBoard ? "1→6 (тонкая сверху)" : "6→1 (толстая сверху)";
+    }
   }
 
   function isMobileView() {
@@ -421,7 +429,8 @@
   }
 
   function yForStringIndex(layout, stringIndex) {
-    return layout.stringTop + (layout.stringGap * stringIndex);
+    const row = invertBoard ? 5 - stringIndex : stringIndex;
+    return layout.stringTop + (layout.stringGap * row);
   }
 
   function drawPlaceholder(message) {
@@ -1279,6 +1288,14 @@
   [rootSelect, scaleSelect, tuningSelect, modeSelect, cagedStageSelect, fretsInput, labelsSelect].forEach((el) => {
     el.addEventListener("input", () => onControlsChanged(el));
     el.addEventListener("change", () => onControlsChanged(el));
+  });
+
+  boardInvertBtn.addEventListener("click", () => {
+    invertBoard = !invertBoard;
+    boardInvertBtn.classList.toggle("is-on", invertBoard);
+    boardInvertBtn.title = invertBoard ? "1→6 (тонкая сверху)" : "6→1 (толстая сверху)";
+    saveSettings();
+    scheduleRender();
   });
 
   customTuningInput.addEventListener("input", () => { saveSettings(); scheduleRender(); });

@@ -35,6 +35,7 @@
   const metaEl = document.getElementById("songMeta");
   const arrSelect = document.getElementById("arrSelect");
   const tuningEl = document.getElementById("songTuning");
+  const songProps = document.getElementById("songProps");
   const playBtn = document.getElementById("playBtn");
   const timeNowEl = document.getElementById("timeNow");
   const timeTotalEl = document.getElementById("timeTotal");
@@ -442,7 +443,7 @@
     titleEl.textContent = song.title || "—";
     metaEl.textContent = [song.artist, song.album, song.year].filter(Boolean).join(" · ");
     arrSelect.innerHTML = "";
-    const labels = { lead: "Lead", rhythm: "Rhythm", lead2: "Lead 2", bass: "Bass", combo: "Combo" };
+    const labels = { lead: "Lead", rhythm: "Rhythm", rhythm2: "Rhythm 2", lead2: "Lead 2", bass: "Bass", combo: "Combo" };
     for (const key of Object.keys(song.arrangements)) {
       const opt = document.createElement("option");
       opt.value = key;
@@ -457,9 +458,22 @@
 
   arrSelect.addEventListener("change", () => { const wasPlaying = playing; const t = songTime(); selectArrangement(arrSelect.value); seek(t); if (wasPlaying) { /* keep position */ } });
 
+  const TECH_LABELS = {
+    palmMutes: "палм-мьюты", harmonics: "флажолеты", pinchHarmonics: "пинч-гармоники",
+    hopo: "hammer/pull", tapping: "тэппинг", slides: "слайды", bends: "бенды",
+    tremolo: "тремоло", vibrato: "вибрато", powerChords: "квинты", barreChords: "барре",
+    openChords: "открытые аккорды", doubleStops: "даблстопы", fretHandMutes: "мьюты",
+    dropDPower: "drop-D", twoFingerPicking: "пальцами", slapPop: "слэп",
+  };
+
   function selectArrangement(key) {
     arr = song.arrangements[key];
-    tuningEl.textContent = `Строй: ${arr.tuningName}${arr.capo ? " · капо " + arr.capo : ""}`;
+    const ts = arr.timeSig ? `${arr.timeSig.num}/${arr.timeSig.den}` : "";
+    tuningEl.textContent = `Строй: ${arr.tuningName}${arr.capo ? " · капо " + arr.capo : ""}${ts ? " · " + ts : ""}`;
+    if (songProps) {
+      const used = Object.keys(TECH_LABELS).filter((k) => arr.props && arr.props[k]).map((k) => TECH_LABELS[k]);
+      songProps.textContent = used.length ? "Приёмы: " + used.join(", ") : "";
+    }
     let maxFret = 12;
     for (const n of arr.notes) if (n.f > maxFret) maxFret = n.f;
     frets = clamp(maxFret + 1, 12, 24);
@@ -779,14 +793,22 @@
       ctx.fillText(`${6 - s} ${NOTE_NAMES_SHARP[arr.openMidi[s] % 12]}`, 8, y);
     }
 
-    // beat grid lines for orientation
+    // beat grid lines + measure numbers for orientation
+    ctx.textBaseline = "top";
     for (const b of arr.beats) {
-      if (b.t < t) continue;
+      if (b.t < t - 0.1) continue;
       if (b.t > t + HW_WINDOW) break;
       const bx = timeToX(b.t);
-      ctx.strokeStyle = b.measure != null ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.05)";
-      ctx.lineWidth = 1;
+      const downbeat = b.measure != null;
+      ctx.strokeStyle = downbeat ? "rgba(255,255,255,0.22)" : "rgba(255,255,255,0.06)";
+      ctx.lineWidth = downbeat ? 1.5 : 1;
       ctx.beginPath(); ctx.moveTo(bx, 0); ctx.lineTo(bx, hwH); ctx.stroke();
+      if (downbeat && bx >= strikeX - 4) {
+        ctx.fillStyle = "rgba(226,232,240,0.8)";
+        ctx.font = "700 11px Rajdhani, Segoe UI, sans-serif";
+        ctx.textAlign = "left";
+        ctx.fillText(String(b.measure), bx + 3, 3);
+      }
     }
 
     // strike line
@@ -883,7 +905,8 @@
     } else infoNotes.textContent = "—";
     let measure = null;
     for (const b of arr.beats) { if (b.t > t) break; if (b.measure != null) measure = b.measure; }
-    infoBeat.textContent = `${measure != null ? "такт " + measure : "—"} · ${Math.round(arr.tempo)} BPM`;
+    const ts = arr.timeSig ? `${arr.timeSig.num}/${arr.timeSig.den}` : "";
+    infoBeat.textContent = `${measure != null ? "такт " + measure : "—"}${ts ? " · " + ts : ""} · ${Math.round(arr.tempo)} BPM`;
   }
 
   let stripSig = "";

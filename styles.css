@@ -776,6 +776,13 @@ input:disabled {
   white-space: nowrap;
 }
 
+.song-props {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.78rem;
+  color: var(--text-soft);
+}
+
 /* Current scale panel */
 .scale-panel {
   display: flex;
