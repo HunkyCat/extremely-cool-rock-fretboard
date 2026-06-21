@@ -188,9 +188,23 @@
       const fret = int(el.getAttribute("fret"));
       const pc = s >= 0 && s < 6 ? ((openMidi[s] + fret) % 12 + 12) % 12 : 0;
       const n = { t: r3(num(el.getAttribute("time"))), s, f: fret, sus: r3(num(el.getAttribute("sustain"))), pc };
-      if (el.getAttribute("palmMute") === "1") n.pm = 1;
-      if (el.getAttribute("hopo") === "1" || el.getAttribute("hammerOn") === "1" || el.getAttribute("pullOff") === "1") n.hopo = 1;
-      if (int(el.getAttribute("slideTo"), -1) >= 0) n.slideTo = int(el.getAttribute("slideTo"));
+      const flag = (a) => el.getAttribute(a) === "1";
+      const pos = (a) => int(el.getAttribute(a), 0) > 0;
+      if (flag("palmMute")) n.pm = 1;
+      if (flag("hammerOn")) n.ho = 1;
+      if (flag("pullOff")) n.po = 1;
+      if (flag("hopo")) n.hopo = 1;
+      if (flag("tap") || pos("tap")) n.tap = 1;
+      if (flag("harmonic")) n.harm = 1;
+      if (flag("harmonicPinch")) n.pinch = 1;
+      if (flag("mute")) n.mute = 1; // fret-hand mute
+      if (flag("vibrato") || pos("vibrato")) n.vib = 1;
+      if (flag("accent")) n.acc = 1;
+      if (flag("tremolo")) n.trem = 1;
+      const slideTo = int(el.getAttribute("slideTo"), -1);
+      if (slideTo >= 0) n.slideTo = slideTo;
+      const slideUn = int(el.getAttribute("slideUnpitchTo"), -1);
+      if (slideUn >= 0) n.slideUn = slideUn;
       const bend = el.getAttribute("bend");
       if (bend && bend !== "0") n.bend = 1;
       if (chordName) n.chord = chordName;

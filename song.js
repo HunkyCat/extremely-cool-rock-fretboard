@@ -52,6 +52,10 @@
   const loopSecBtn = document.getElementById("loopSecBtn");
   const loopToggle = document.getElementById("loopToggle");
   const loopClear = document.getElementById("loopClear");
+  const invHwBtn = document.getElementById("invHwBtn");
+  const invBoardBtn = document.getElementById("invBoardBtn");
+  const invHwState = document.getElementById("invHwState");
+  const invBoardState = document.getElementById("invBoardState");
   const scaleRibbon = document.getElementById("scaleRibbon");
   const scaleNowName = document.getElementById("scaleNowName");
   const scaleStrip = document.getElementById("scaleStrip");
@@ -64,8 +68,19 @@
   let song = null;
   let arr = null;
   let frets = 22;
+  let minFret = 0;
   let songTabActive = false;
   let rafId = null;
+  let invertHW = false;    // tab/highway orientation
+  let invertBoard = false; // fretboard orientation
+
+  function orientText(inv) { return inv ? "1→6 (тонкая сверху)" : "6→1 (толстая сверху)"; }
+  function updateOrientUI() {
+    invHwState.textContent = orientText(invertHW);
+    invBoardState.textContent = orientText(invertBoard);
+    invHwBtn.classList.toggle("is-on", invertHW);
+    invBoardBtn.classList.toggle("is-on", invertBoard);
+  }
 
   function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
   function fmtTime(s) {
@@ -266,6 +281,9 @@
   });
   loopToggle.addEventListener("click", () => { loopOn = !loopOn; updateLoopUI(); });
   loopClear.addEventListener("click", resetLoop);
+
+  invHwBtn.addEventListener("click", () => { invertHW = !invertHW; updateOrientUI(); renderFrame(); });
+  invBoardBtn.addEventListener("click", () => { invertBoard = !invertBoard; updateOrientUI(); renderFrame(); });
 
   // ============ Loading ============
   function bindDrop() {
@@ -471,7 +489,32 @@
   }
   const xFretLine = (L, f) => L.left + f * L.fw;
   const xNote = (L, f) => (f === 0 ? L.left - L.fw * 0.3 : L.left + (f - 0.5) * L.fw);
-  const yString = (L, s) => L.sTop + L.gap * s;
+  const yString = (L, s) => L.sTop + L.gap * (invertBoard ? 5 - s : s);
+
+  function techGlyph(n) {
+    if (n.mute) return "✕";
+    if (n.harm || n.pinch) return "◇";
+    if (n.tap) return "T";
+    if (n.slideTo != null) return n.slideTo > n.f ? "／" : "＼";
+    if (n.ho) return "H";
+    if (n.po) return "P";
+    if (n.bend) return "↗";
+    return null;
+  }
+
+  // Detect whether the notes around time t sit inside a single ~5-fret position (CAGED-ish box).
+  function detectBox(t) {
+    const win = [];
+    for (const n of arr.notes) {
+      if (n.t > t + 1.6) break;
+      if (n.t >= t - 2.4 && n.f > 0 && n.s >= 0 && n.s <= 5) win.push(n);
+    }
+    if (win.length < 3) return null;
+    let lo = 99, hi = -1;
+    for (const n of win) { lo = Math.min(lo, n.f); hi = Math.max(hi, n.f); }
+    if (hi - lo > 5) return null;
+    return { lo, hi };
+  }
 
   function notesActiveAt(t) {
     const active = [], upcoming = [];
@@ -519,42 +562,75 @@
       ctx.fillText(`${6 - s} (${NOTE_NAMES_SHARP[arr.openMidi[s] % 12]})`, L.right + 10, y);
     }
 
+    // Current position box (CAGED-ish): shade the fret window if the riff sits in one position
+    const box = detectBox(t);
+    if (box) {
+      const x0 = xFretLine(L, Math.max(0, box.lo - 1));
+      const x1 = xFretLine(L, Math.min(frets, box.hi));
+      ctx.fillStyle = "rgba(56,189,248,0.10)";
+      ctx.fillRect(x0, L.sTop - L.gap * 0.5, x1 - x0, (L.sBottom - L.sTop) + L.gap);
+      ctx.strokeStyle = "rgba(56,189,248,0.5)"; ctx.lineWidth = 1.5;
+      ctx.strokeRect(x0, L.sTop - L.gap * 0.5, x1 - x0, (L.sBottom - L.sTop) + L.gap);
+      ctx.fillStyle = "#7dd3fc"; ctx.font = "700 12px Rajdhani, Segoe UI, sans-serif";
+      ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+      ctx.fillText(`позиция ${box.lo}–${box.hi} лад`, x0 + 6, L.sTop - L.gap * 0.5 - 4);
+    }
+
+    // Scale notes across the whole board (what's available in the current key)
+    const dotR = clamp(Math.min(L.fw, L.gap) * 0.28, 7, 12);
     if (scaleSet) {
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
       for (let s = 0; s < 6; s += 1) {
         const y = yString(L, s);
         for (let f = 0; f <= frets; f += 1) {
           const pc = (arr.openMidi[s] + f) % 12;
           if (!scaleSet.has(pc)) continue;
           const isRoot = pc === scale.root;
-          ctx.fillStyle = isRoot ? "rgba(245,158,11,0.28)" : "rgba(147,197,253,0.14)";
-          ctx.beginPath(); ctx.arc(xNote(L, f), y, isRoot ? 6 : 4.5, 0, Math.PI * 2); ctx.fill();
+          const x = xNote(L, f);
+          ctx.beginPath(); ctx.arc(x, y, isRoot ? dotR + 1 : dotR, 0, Math.PI * 2);
+          ctx.fillStyle = isRoot ? "rgba(245,158,11,0.85)" : "rgba(59,130,246,0.4)";
+          ctx.fill();
+          ctx.lineWidth = 1; ctx.strokeStyle = isRoot ? "#fde68a" : "rgba(147,197,253,0.6)"; ctx.stroke();
+          ctx.fillStyle = isRoot ? "#3b2406" : "rgba(226,232,240,0.92)";
+          ctx.font = `700 ${dotR}px Rajdhani, Segoe UI, sans-serif`;
+          ctx.fillText(NOTE_NAMES_SHARP[pc], x, y);
         }
       }
     }
 
     const { active, upcoming } = notesActiveAt(t);
-    const r = clamp(Math.min(L.fw, L.gap) * 0.34, 9, 15);
+    const r = clamp(Math.min(L.fw, L.gap) * 0.36, 10, 16);
 
+    // Upcoming notes: proximity shown by COLOR (cyan far -> orange near), constant size
     for (const n of upcoming) {
       if (n.s < 0 || n.s > 5) continue;
-      const prox = 1 - (n.t - t) / LOOKAHEAD;
+      const prox = clamp(1 - (n.t - t) / LOOKAHEAD, 0, 1);
       const x = xNote(L, n.f), y = yString(L, n.s);
-      ctx.globalAlpha = 0.18 + prox * 0.5;
-      ctx.fillStyle = "#1f2937"; ctx.strokeStyle = "#93c5fd"; ctx.lineWidth = 1.6;
-      ctx.beginPath(); ctx.arc(x, y, r * (0.55 + prox * 0.45), 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      const hue = 190 - prox * 165; // 190 (cyan) -> 25 (orange)
+      ctx.globalAlpha = 0.45 + prox * 0.45;
+      ctx.fillStyle = `hsl(${hue} 85% 55%)`;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
       ctx.globalAlpha = 1;
+      ctx.fillStyle = "rgba(10,15,25,0.9)"; ctx.font = `700 ${r * 0.9}px Rajdhani, Segoe UI, sans-serif`;
+      ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(String(n.f), x, y);
     }
 
+    // Active notes: bright gem + fret + technique glyph
     for (const n of active) {
       if (n.s < 0 || n.s > 5) continue;
       const x = xNote(L, n.f), y = yString(L, n.s);
-      const glow = ctx.createRadialGradient(x, y, 2, x, y, r + 16);
-      glow.addColorStop(0, "rgba(251,146,60,0.7)"); glow.addColorStop(1, "rgba(251,146,60,0)");
-      ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(x, y, r + 16, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = n.pm ? "#b45309" : "#f59e0b"; ctx.strokeStyle = "#fde68a"; ctx.lineWidth = 2.4;
-      ctx.beginPath(); ctx.arc(x, y, r + 2, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = "#111827"; ctx.font = `700 ${r}px Rajdhani, Segoe UI, sans-serif`;
+      const glow = ctx.createRadialGradient(x, y, 2, x, y, r + 18);
+      glow.addColorStop(0, "rgba(251,146,60,0.8)"); glow.addColorStop(1, "rgba(251,146,60,0)");
+      ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(x, y, r + 18, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = n.pm ? "#b45309" : "#fb923c"; ctx.strokeStyle = "#fff7ed"; ctx.lineWidth = 2.6;
+      ctx.beginPath(); ctx.arc(x, y, r + 3, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = "#111827"; ctx.font = `800 ${r + 1}px Rajdhani, Segoe UI, sans-serif`;
       ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(String(n.f), x, y);
+      const g = techGlyph(n);
+      if (g) {
+        ctx.fillStyle = "#fde68a"; ctx.font = "700 12px Rajdhani, Segoe UI, sans-serif";
+        ctx.fillText(g, x + r + 8, y - r);
+      }
     }
 
     ctx.fillStyle = "#94a3b8"; ctx.font = "600 11px Rajdhani, Segoe UI, sans-serif"; ctx.textAlign = "center";
@@ -566,7 +642,7 @@
     timeNowEl.textContent = fmtTime(t);
   }
 
-  const HW_WINDOW = 2.6; // seconds of upcoming notes visible in the highway
+  const HW_WINDOW = 3.0; // seconds of upcoming notes visible in the highway
   function renderHighway(t) {
     if (!hwW) return;
     const ctx = highway.getContext("2d");
@@ -575,54 +651,94 @@
     bg.addColorStop(0, "#0c1322"); bg.addColorStop(1, "#0a0f18");
     ctx.fillStyle = bg; ctx.fillRect(0, 0, hwW, hwH);
 
-    const strikeX = 60;
+    const strikeX = 78;
     const rowH = hwH / 6;
-    const trackW = hwW - strikeX - 10;
-    const yFor = (s) => (s + 0.5) * rowH;
+    const trackW = hwW - strikeX - 12;
+    const head = Math.min(rowH * 0.82, 50);
+    const rowOf = (s) => (invertHW ? 5 - s : s);
+    const yFor = (s) => (rowOf(s) + 0.5) * rowH;
+    const timeToX = (tt) => strikeX + ((tt - t) / HW_WINDOW) * trackW;
 
-    // row guides + open string labels
+    // row guides + string labels (number + open note)
     for (let s = 0; s < 6; s += 1) {
       const y = yFor(s);
-      ctx.strokeStyle = "rgba(148,163,184,0.18)";
-      ctx.lineWidth = 1;
+      ctx.strokeStyle = "rgba(148,163,184,0.16)"; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(strikeX, y); ctx.lineTo(hwW, y); ctx.stroke();
       ctx.fillStyle = STRING_COLORS[s];
-      ctx.font = "700 11px Rajdhani, Segoe UI, sans-serif";
+      ctx.font = "800 14px Rajdhani, Segoe UI, sans-serif";
       ctx.textAlign = "left"; ctx.textBaseline = "middle";
-      ctx.fillText(`${6 - s}`, 8, y);
+      ctx.fillText(`${6 - s} ${NOTE_NAMES_SHARP[arr.openMidi[s] % 12]}`, 8, y);
+    }
+
+    // beat grid lines for orientation
+    for (const b of arr.beats) {
+      if (b.t < t) continue;
+      if (b.t > t + HW_WINDOW) break;
+      const bx = timeToX(b.t);
+      ctx.strokeStyle = b.measure != null ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.05)";
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(bx, 0); ctx.lineTo(bx, hwH); ctx.stroke();
     }
 
     // strike line
-    ctx.fillStyle = "rgba(255,124,34,0.85)";
-    ctx.fillRect(strikeX - 1, 0, 2, hwH);
-    ctx.fillStyle = "rgba(255,124,34,0.15)";
-    ctx.fillRect(strikeX - 8, 0, 8, hwH);
+    ctx.fillStyle = "rgba(255,124,34,0.9)"; ctx.fillRect(strikeX - 1.5, 0, 3, hwH);
+    ctx.fillStyle = "rgba(255,124,34,0.16)"; ctx.fillRect(strikeX - 12, 0, 12, hwH);
 
     const a = arr.notes;
-    let i = firstNoteIdx(t - 0.25);
+    // start early so long sustains keep their tail while still ringing
+    let i = firstNoteIdx(t - 6);
+    if (i < 0) i = 0;
     for (; i < a.length; i += 1) {
       const n = a[i];
       if (n.t > t + HW_WINDOW) break;
       if (n.s < 0 || n.s > 5) continue;
-      const x = strikeX + ((n.t - t) / HW_WINDOW) * trackW;
-      const lenPx = clamp((Math.max(n.sus, 0.08) / HW_WINDOW) * trackW, 8, trackW);
+      const susEff = Math.max(n.sus, 0);
+      const xHead = timeToX(n.t);
+      const xTail = timeToX(n.t + susEff);
+      if (xTail < 0 || xHead > hwW) continue; // fully off-screen
       const y = yFor(n.s);
-      const h = rowH * 0.62;
-      const hit = Math.abs(n.t - t) < 0.06;
-      ctx.globalAlpha = n.pm ? 0.6 : 1;
-      ctx.fillStyle = STRING_COLORS[n.s];
-      roundRect(ctx, x, y - h / 2, lenPx, h, 5);
-      ctx.fill();
-      if (hit) {
+      const color = STRING_COLORS[n.s];
+      const dim = n.pm ? 0.55 : 1;
+
+      // sustain trail (head -> tail), clipped to visible area
+      if (xTail - xHead > 3) {
+        const tl = Math.max(xHead, 0), tr = Math.min(xTail, hwW);
+        ctx.globalAlpha = 0.45 * dim;
+        ctx.fillStyle = color;
+        roundRect(ctx, tl, y - rowH * 0.16, tr - tl, rowH * 0.32, 5); ctx.fill();
         ctx.globalAlpha = 1;
-        ctx.strokeStyle = "#fde68a"; ctx.lineWidth = 2.5; ctx.stroke();
       }
-      ctx.globalAlpha = 1;
-      // fret label on the head
-      ctx.fillStyle = "#0b1220";
-      ctx.font = "700 12px Rajdhani, Segoe UI, sans-serif";
-      ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      if (lenPx > 14) ctx.fillText(String(n.f), x + Math.min(lenPx / 2, 12), y);
+
+      // head gem — visible while approaching / at the strike, gone once played
+      if (xHead >= strikeX - head * 0.6 && xHead <= hwW + head) {
+        const hit = n.t <= t + 0.02 && t <= n.t + Math.max(susEff, 0.08);
+        ctx.globalAlpha = dim;
+        ctx.fillStyle = color;
+        roundRect(ctx, xHead - head / 2, y - head / 2, head, head, 9); ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.lineWidth = hit ? 4 : (n.acc ? 3 : 1.5);
+        ctx.strokeStyle = hit ? "#fff7ed" : (n.acc ? "#fde68a" : "rgba(0,0,0,0.35)");
+        roundRect(ctx, xHead - head / 2, y - head / 2, head, head, 9); ctx.stroke();
+        // fret number — big and dark for contrast
+        ctx.fillStyle = "#0b1220";
+        ctx.font = `800 ${Math.round(head * 0.56)}px Rajdhani, Segoe UI, sans-serif`;
+        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText(String(n.f), xHead, y + 1);
+        // technique badge (top-right corner of gem)
+        const g = techGlyph(n);
+        if (g) {
+          ctx.fillStyle = "#0b1220"; ctx.globalAlpha = 0.8;
+          ctx.beginPath(); ctx.arc(xHead + head * 0.42, y - head * 0.42, head * 0.24, 0, Math.PI * 2); ctx.fill();
+          ctx.globalAlpha = 1; ctx.fillStyle = "#fde68a";
+          ctx.font = `800 ${Math.round(head * 0.32)}px Rajdhani, Segoe UI, sans-serif`;
+          ctx.fillText(g, xHead + head * 0.42, y - head * 0.4);
+        }
+        if (n.pm) {
+          ctx.fillStyle = "rgba(255,255,255,0.85)";
+          ctx.font = "700 9px Rajdhani, Segoe UI, sans-serif";
+          ctx.fillText("PM", xHead, y + head * 0.42);
+        }
+      }
     }
     ctx.globalAlpha = 1;
   }
@@ -731,4 +847,5 @@
   });
 
   bindDrop();
+  updateOrientUI();
 })();

@@ -736,7 +736,7 @@ input:disabled {
 
 .song-board-wrap {
   position: relative;
-  height: 560px;
+  height: 720px;
   display: flex;
   flex-direction: column;
   border-radius: 14px;
@@ -748,14 +748,21 @@ input:disabled {
 .highway {
   display: block;
   width: 100%;
-  height: 42%;
-  border-bottom: 1px solid rgba(147, 129, 113, 0.4);
+  height: 50%;
+  border-bottom: 2px solid rgba(255, 124, 34, 0.35);
 }
 
 #songCanvas {
   display: block;
   width: 100%;
-  height: 58%;
+  height: 50%;
+}
+
+.orient-state {
+  font-size: 0.72rem;
+  color: var(--text-soft);
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 /* Current scale panel */
