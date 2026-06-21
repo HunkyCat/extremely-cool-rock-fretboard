@@ -59,6 +59,7 @@
   const invHwState = document.getElementById("invHwState");
   const invBoardState = document.getElementById("invBoardState");
   const scaleRibbon = document.getElementById("scaleRibbon");
+  const lyricsEl = document.getElementById("lyrics");
   const scaleNowName = document.getElementById("scaleNowName");
   const scaleStrip = document.getElementById("scaleStrip");
   const infoSection = document.getElementById("infoSection");
@@ -452,6 +453,7 @@
     }
     arrSelect.value = song.arrangements.lead ? "lead" : Object.keys(song.arrangements)[0];
     resetLoop();
+    buildLyrics();
     selectArrangement(arrSelect.value);
     timeTotalEl.textContent = fmtTime(song.length);
   }
@@ -760,6 +762,7 @@
     for (let f = 1; f <= frets; f += 1) ctx.fillText(String(f), xNote(L, f), L.bottom + 16);
 
     renderHighway(t);
+    renderLyrics(t);
     updateInfo(t, secIdx, scale, active);
     playheadEl.style.left = `${clamp(t / song.length, 0, 1) * 100}%`;
     timeNowEl.textContent = fmtTime(t);
@@ -938,6 +941,66 @@
     }
     const playing = new Set(active.map((n) => n.pc));
     for (let pc = 0; pc < 12; pc += 1) scaleCells[pc].classList.toggle("playing", playing.has(pc));
+  }
+
+  // ============ Lyrics (vocals, synced) ============
+  let lyricLines = [];
+  let lyricLineIdx = -1;
+  function buildLyrics() {
+    lyricLines = [];
+    lyricLineIdx = -1;
+    lyricsEl.innerHTML = "";
+    const v = song && song.vocals;
+    if (!v || !v.length) { lyricsEl.hidden = true; return; }
+    let cur = [];
+    for (const ev of v) {
+      cur.push(ev);
+      if (ev.lineBreak) { lyricLines.push(cur); cur = []; }
+    }
+    if (cur.length) lyricLines.push(cur);
+    lyricLines = lyricLines.map((words) => ({
+      t: words[0].t,
+      end: words[words.length - 1].t + (words[words.length - 1].len || 0.3),
+      words,
+    }));
+    lyricsEl.hidden = false;
+  }
+
+  function renderLyrics(t) {
+    if (!lyricLines.length) return;
+    let idx = -1;
+    for (let i = 0; i < lyricLines.length; i += 1) {
+      if (t >= lyricLines[i].t - 0.4 && t <= lyricLines[i].end + 0.8) { idx = i; break; }
+    }
+    if (idx === -1) {
+      for (let i = 0; i < lyricLines.length; i += 1) {
+        if (lyricLines[i].t > t) { if (lyricLines[i].t - t < 3) idx = i; break; }
+      }
+    }
+    if (idx === -1) {
+      for (let i = lyricLines.length - 1; i >= 0; i -= 1) { if (lyricLines[i].t <= t) { idx = i; break; } }
+    }
+    if (idx === -1) return;
+    const L = lyricLines[idx];
+    if (idx !== lyricLineIdx) {
+      lyricLineIdx = idx;
+      lyricsEl.innerHTML = "";
+      L.words.forEach((w, j) => {
+        const span = document.createElement("span");
+        span.className = "word";
+        span.textContent = w.text + (w.joinNext || j === L.words.length - 1 ? "" : " ");
+        lyricsEl.appendChild(span);
+      });
+    }
+    const spans = lyricsEl.children;
+    for (let j = 0; j < L.words.length; j += 1) {
+      const w = L.words[j];
+      const span = spans[j];
+      if (!span) continue;
+      const dur = Math.max(w.len, 0.15);
+      span.classList.toggle("active", t >= w.t && t < w.t + dur);
+      span.classList.toggle("sung", t >= w.t + dur);
+    }
   }
 
   // ============ Loop ============

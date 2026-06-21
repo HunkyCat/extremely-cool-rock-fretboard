@@ -181,7 +181,13 @@
       rawSec.push({ name: s.getAttribute("name"), t: r3(num(s.getAttribute("startTime"))) });
     });
     rawSec.sort((a, b) => a.t - b.t);
-    const sections = rawSec.map((s, n) => ({ ...s, end: n + 1 < rawSec.length ? rawSec[n + 1].t : null }));
+    // Merge consecutive sections with the same name (RS often splits e.g. an intro into chunks)
+    const mergedSec = [];
+    for (const s of rawSec) {
+      if (mergedSec.length && mergedSec[mergedSec.length - 1].name === s.name) continue;
+      mergedSec.push(s);
+    }
+    const sections = mergedSec.map((s, n) => ({ ...s, end: n + 1 < mergedSec.length ? mergedSec[n + 1].t : null }));
 
     const mkNote = (el, chordName) => {
       const s = int(el.getAttribute("string"));
@@ -320,6 +326,26 @@
       throw new Error("Не удалось разобрать партии из psarc");
     }
 
+    // Vocals (lyrics) — shared across all instrument parts, synced to the song.
+    let vocals = null;
+    const vocalName = arc.names.find((n) => n.endsWith(".xml") && n.includes("/arr/") && n.includes("vocal"));
+    if (vocalName) {
+      try {
+        const vbytes = await arc.extract(arc.files[vocalName]);
+        const vdoc = parser.parseFromString(new TextDecoder("utf-8").decode(vbytes), "application/xml");
+        const evs = [];
+        vdoc.querySelectorAll("vocals > vocal").forEach((v) => {
+          let text = v.getAttribute("lyric") || "";
+          let lineBreak = false;
+          let joinNext = false;
+          if (text.endsWith("+")) { lineBreak = true; text = text.slice(0, -1); }
+          if (text.endsWith("-")) { joinNext = true; text = text.slice(0, -1); }
+          evs.push({ t: r3(num(v.getAttribute("time"))), len: r3(num(v.getAttribute("length"))), text, lineBreak, joinNext });
+        });
+        if (evs.length) { evs.sort((a, b) => a.t - b.t); vocals = evs; }
+      } catch (_) { vocals = null; }
+    }
+
     // Extract the main song audio (.wem) so the player can offer the real track.
     let audioWem = null;
     const wemNames = arc.names.filter((n) => n.endsWith(".wem"));
@@ -328,7 +354,7 @@
       audioWem = await arc.extract(arc.files[mainWem]);
     }
 
-    return { ...meta, arrangements, audioWem };
+    return { ...meta, arrangements, audioWem, vocals };
   }
 
   window.RSParse = { parsePsarc, readPsarc };
