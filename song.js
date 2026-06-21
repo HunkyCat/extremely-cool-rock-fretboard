@@ -47,6 +47,7 @@
   const highway = document.getElementById("highwayCanvas");
   const sourceSel = document.getElementById("sourceSel");
   const tempoSel = document.getElementById("tempoSel");
+  const pitchKeep = document.getElementById("pitchKeep");
   const loopAbtn = document.getElementById("loopAbtn");
   const loopBbtn = document.getElementById("loopBbtn");
   const loopSecBtn = document.getElementById("loopSecBtn");
@@ -109,13 +110,33 @@
   let oggUrl = null;
   let originalReady = false;
   let codebooksPromise = null;
+  let preservePitch = true;
+  // smooth-clock interpolation for <audio> (its currentTime updates in coarse steps)
+  let mediaBaseCt = 0;
+  let mediaBasePerf = 0;
+  let mediaLastReport = -1;
 
   function ensureCtx() {
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     return audioCtx;
   }
   function songTime() {
-    if (source === "original" && audioEl) return audioEl.currentTime;
+    if (source === "original" && audioEl) {
+      const actual = audioEl.currentTime;
+      if (audioEl.paused) {
+        mediaLastReport = actual; mediaBaseCt = actual; mediaBasePerf = performance.now();
+        return actual;
+      }
+      // re-anchor whenever the media reports a fresh (coarse) time, then interpolate between
+      if (actual !== mediaLastReport) {
+        mediaLastReport = actual; mediaBaseCt = actual; mediaBasePerf = performance.now();
+      }
+      let predicted = mediaBaseCt + ((performance.now() - mediaBasePerf) / 1000) * (audioEl.playbackRate || 1);
+      const cap = Math.min(songLength(), actual + 0.35); // don't drift far ahead if media stalls
+      if (predicted > cap) predicted = cap;
+      if (predicted < actual) predicted = actual;
+      return predicted;
+    }
     return playing ? startPos + (audioCtx.currentTime - startCtxTime) * rate : pausedPos;
   }
   function songLength() { return song ? song.length : 0; }
@@ -149,7 +170,7 @@
       oggUrl = URL.createObjectURL(blob);
       audioEl = new Audio();
       audioEl.src = oggUrl;
-      audioEl.preservesPitch = true;
+      audioEl.preservesPitch = preservePitch;
       audioEl.playbackRate = rate;
       await new Promise((res, rej) => {
         audioEl.addEventListener("loadedmetadata", res, { once: true });
@@ -255,7 +276,7 @@
     if (source === "original" && audioEl) {
       if (audioEl.currentTime >= songLength() - 0.05) audioEl.currentTime = 0;
       audioEl.playbackRate = rate;
-      audioEl.preservesPitch = true;
+      audioEl.preservesPitch = preservePitch;
       try { await audioEl.play(); } catch (_) { statusEl.textContent = "Браузер заблокировал аудио — нажми ещё раз"; return; }
       playing = true; playBtn.textContent = "❚❚"; startLoop(); return;
     }
@@ -332,9 +353,14 @@
 
   tempoSel.addEventListener("change", () => {
     rate = parseFloat(tempoSel.value) || 1;
-    if (source === "original" && audioEl) { audioEl.playbackRate = rate; audioEl.preservesPitch = true; }
+    if (source === "original" && audioEl) { audioEl.playbackRate = rate; audioEl.preservesPitch = preservePitch; }
     else reanchor();
     renderFrame();
+  });
+
+  pitchKeep.addEventListener("change", () => {
+    preservePitch = pitchKeep.checked;
+    if (source === "original" && audioEl) audioEl.preservesPitch = preservePitch;
   });
 
   sourceSel.addEventListener("change", async () => {

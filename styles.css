@@ -686,6 +686,17 @@ input:disabled {
 
 .ctl-group select { width: auto; padding: 7px 10px; font-size: 0.95rem; }
 
+.ctl-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.8rem;
+  color: var(--text-soft);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ctl-check input { width: auto; }
+
 .riff-btn.small {
   padding: 7px 11px;
   font-size: 0.9rem;
