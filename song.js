@@ -162,12 +162,12 @@
     infoSource.textContent = "Синтезатор";
   }
 
-  function ensureOriginal() {
+  function ensureOriginal(silent) {
     if (originalReady) return Promise.resolve(true);
     if (originalPromise) return originalPromise;
-    if (!song || !song.audioWem) { statusEl.textContent = "В этом psarc нет аудиодорожки"; return Promise.resolve(false); }
-    if (!window.WemToOgg) { statusEl.textContent = "Конвертер аудио не загружен"; return Promise.resolve(false); }
-    statusEl.textContent = "Декодирую оригинал… (несколько секунд)";
+    if (!song || !song.audioWem) { if (!silent) statusEl.textContent = "В этом psarc нет аудиодорожки"; return Promise.resolve(false); }
+    if (!window.WemToOgg) { if (!silent) statusEl.textContent = "Конвертер аудио не загружен"; return Promise.resolve(false); }
+    if (!silent) statusEl.textContent = "Декодирую оригинал… (несколько секунд)";
     originalPromise = (async () => {
       try {
         const cb = await fetchCodebooks();
@@ -191,7 +191,7 @@
         statusEl.textContent = "";
         return true;
       } catch (e) {
-        statusEl.textContent = "Не удалось декодировать оригинал: " + e.message;
+        if (!silent) statusEl.textContent = "Не удалось декодировать оригинал: " + e.message;
         originalPromise = null; // allow retry
         return false;
       }
@@ -454,6 +454,9 @@
       resizeCanvas();
       renderFrame();
       dropStatus.textContent = "";
+      // Pre-decode the real track in the background so "Оригинал" is ready
+      // before the user presses Play (avoids the autoplay-gesture race).
+      ensureOriginal(true).catch(() => {});
     } catch (err) {
       dropStatus.textContent = "Не удалось разобрать: " + err.message;
     }
