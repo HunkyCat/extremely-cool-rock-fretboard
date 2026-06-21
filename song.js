@@ -60,6 +60,9 @@
   const invBoardState = document.getElementById("invBoardState");
   const scaleRibbon = document.getElementById("scaleRibbon");
   const lyricsEl = document.getElementById("lyrics");
+  const lyricLine = document.getElementById("lyricLine");
+  const lyricBall = document.getElementById("lyricBall");
+  const volumeSlider = document.getElementById("volume");
   const scaleNowName = document.getElementById("scaleNowName");
   const scaleStrip = document.getElementById("scaleStrip");
   const infoSection = document.getElementById("infoSection");
@@ -114,6 +117,7 @@
   let originalPromise = null;
   let codebooksPromise = null;
   let preservePitch = true;
+  let volume = 0.8;
   // smooth-clock interpolation for <audio> (its currentTime updates in coarse steps)
   let mediaBaseCt = 0;
   let mediaBasePerf = 0;
@@ -178,6 +182,7 @@
         audioEl.src = oggUrl;
         audioEl.preservesPitch = preservePitch;
         audioEl.playbackRate = rate;
+        audioEl.volume = volume;
         await new Promise((res, rej) => {
           audioEl.addEventListener("loadedmetadata", res, { once: true });
           audioEl.addEventListener("error", () => rej(new Error("decode failed")), { once: true });
@@ -228,7 +233,7 @@
     const cab = ctx.createBiquadFilter(); cab.type = "lowpass"; cab.frequency.value = 3400; cab.Q.value = 0.7;
     const comp = ctx.createDynamicsCompressor();
     comp.threshold.value = -24; comp.ratio.value = 4; comp.attack.value = 0.004; comp.release.value = 0.2;
-    const master = ctx.createGain(); master.gain.value = 0.16;
+    const master = ctx.createGain(); master.gain.value = 0.16 * volume;
     hp.connect(pre); pre.connect(drive); drive.connect(cab); cab.connect(comp); comp.connect(master);
     master.connect(ctx.destination);
     return { input: hp, master, nodes: [hp, pre, drive, cab, comp, master] };
@@ -384,6 +389,12 @@
   pitchKeep.addEventListener("change", () => {
     preservePitch = pitchKeep.checked;
     if (source === "original" && audioEl) audioEl.preservesPitch = preservePitch;
+  });
+
+  volumeSlider.addEventListener("input", () => {
+    volume = clamp((parseInt(volumeSlider.value, 10) || 0) / 100, 0, 1);
+    if (audioEl) audioEl.volume = volume;
+    if (amp && amp.master) amp.master.gain.value = 0.16 * volume;
   });
 
   sourceSel.addEventListener("change", async () => {
@@ -641,13 +652,15 @@
     highway.getContext("2d").setTransform(dpr, 0, 0, dpr, 0, 0);
   }
   function layout() {
-    const left = 54, right = cssW - 150, top = 46, bottom = cssH - 34;
+    const left = 74, right = cssW - 150, top = 46, bottom = cssH - 34;
     const fw = (right - left) / Math.max(1, frets);
     const sTop = top + 10, sBottom = bottom - 10, gap = (sBottom - sTop) / 5;
     return { left, right, top, bottom, fw, sTop, sBottom, gap };
   }
   const xFretLine = (L, f) => L.left + f * L.fw;
-  const xNote = (L, f) => (f === 0 ? L.left - L.fw * 0.3 : L.left + (f - 0.5) * L.fw);
+  // Open-string notes sit in a fixed column left of the nut (not fw-proportional,
+  // so they don't slide off-screen when fret width is large).
+  const xNote = (L, f) => (f === 0 ? L.left - 28 : L.left + (f - 0.5) * L.fw);
   const yString = (L, s) => L.sTop + L.gap * (invertBoard ? 5 - s : s);
 
   function techGlyph(n) {
@@ -664,19 +677,29 @@
   // Detect whether the notes around time t sit inside a single ~5-fret position (CAGED-ish box).
   // Uses a tight window around "now" so a position change is picked up quickly; open strings
   // (fret 0) are ignored since they don't pin a hand position.
+  // Position box: anchor on the note nearest to "now", then include only notes within a
+  // hand span of it. This tracks the current hand position and jumps quickly to the next
+  // even across fast neck-spanning transitions (outliers in another position are ignored).
   function detectBox(t) {
-    const frettedFrets = [];
-    let i = firstNoteIdx(t - 0.9);
+    const win = [];
+    let i = firstNoteIdx(t - 0.5);
     if (i < 0) i = 0;
     for (; i < arr.notes.length; i += 1) {
       const n = arr.notes[i];
-      if (n.t > t + 1.3) break;
-      if (n.f > 0 && n.s >= 0 && n.s <= 5) frettedFrets.push(n.f);
+      if (n.t > t + 1.0) break;
+      if (n.f > 0 && n.s >= 0 && n.s <= 5) win.push(n);
     }
-    if (frettedFrets.length < 2) return null;
-    const lo = Math.min(...frettedFrets);
-    const hi = Math.max(...frettedFrets);
-    if (hi - lo > 5) return null; // spread across the neck — not a single position
+    if (!win.length) return null;
+    let anchor = win[0];
+    let best = Infinity;
+    for (const n of win) {
+      const d = Math.abs(n.t - t);
+      if (d < best) { best = d; anchor = n; }
+    }
+    const near = win.filter((n) => Math.abs(n.f - anchor.f) <= 4);
+    let lo = Math.min(...near.map((n) => n.f));
+    let hi = Math.max(...near.map((n) => n.f));
+    if (hi - lo > 5) hi = lo + 5;
     return { lo, hi };
   }
 
@@ -787,6 +810,7 @@
     }
 
     ctx.fillStyle = "#94a3b8"; ctx.font = "600 11px Rajdhani, Segoe UI, sans-serif"; ctx.textAlign = "center";
+    ctx.fillText("0", xNote(L, 0), L.bottom + 16);
     for (let f = 1; f <= frets; f += 1) ctx.fillText(String(f), xNote(L, f), L.bottom + 16);
 
     renderHighway(t);
@@ -835,10 +859,12 @@
       ctx.lineWidth = downbeat ? 1.5 : 1;
       ctx.beginPath(); ctx.moveTo(bx, 0); ctx.lineTo(bx, hwH); ctx.stroke();
       if (downbeat && bx >= strikeX - 4) {
-        ctx.fillStyle = "rgba(226,232,240,0.8)";
-        ctx.font = "700 11px Rajdhani, Segoe UI, sans-serif";
+        ctx.fillStyle = "rgba(15,20,30,0.65)";
+        ctx.fillRect(bx + 2, 2, 26, 20);
+        ctx.fillStyle = "#fde68a";
+        ctx.font = "800 17px Rajdhani, Segoe UI, sans-serif";
         ctx.textAlign = "left";
-        ctx.fillText(String(b.measure), bx + 3, 3);
+        ctx.fillText(String(b.measure), bx + 5, 3);
       }
     }
 
@@ -977,7 +1003,8 @@
   function buildLyrics() {
     lyricLines = [];
     lyricLineIdx = -1;
-    lyricsEl.innerHTML = "";
+    lyricLine.innerHTML = "";
+    lyricBall.style.opacity = "0";
     const v = song && song.vocals;
     if (!v || !v.length) { lyricsEl.hidden = true; return; }
     let cur = [];
@@ -994,40 +1021,53 @@
     lyricsEl.hidden = false;
   }
 
+  const LYRIC_LEAD = 0.4; // switch to the next line this many seconds before it starts
   function renderLyrics(t) {
     if (!lyricLines.length) return;
+    // Current line = the last line that has started (minus a small lead). This switches
+    // promptly to the new line instead of lingering on the old one.
     let idx = -1;
     for (let i = 0; i < lyricLines.length; i += 1) {
-      if (t >= lyricLines[i].t - 0.4 && t <= lyricLines[i].end + 0.8) { idx = i; break; }
+      if (lyricLines[i].t <= t + LYRIC_LEAD) idx = i; else break;
     }
-    if (idx === -1) {
-      for (let i = 0; i < lyricLines.length; i += 1) {
-        if (lyricLines[i].t > t) { if (lyricLines[i].t - t < 3) idx = i; break; }
-      }
-    }
-    if (idx === -1) {
-      for (let i = lyricLines.length - 1; i >= 0; i -= 1) { if (lyricLines[i].t <= t) { idx = i; break; } }
-    }
-    if (idx === -1) return;
+    if (idx === -1) idx = 0;
     const L = lyricLines[idx];
+
     if (idx !== lyricLineIdx) {
       lyricLineIdx = idx;
-      lyricsEl.innerHTML = "";
+      lyricLine.innerHTML = "";
       L.words.forEach((w, j) => {
         const span = document.createElement("span");
         span.className = "word";
         span.textContent = w.text + (w.joinNext || j === L.words.length - 1 ? "" : " ");
-        lyricsEl.appendChild(span);
+        lyricLine.appendChild(span);
       });
     }
-    const spans = lyricsEl.children;
+
+    const spans = lyricLine.children;
+    let activeIdx = -1;
+    let nextIdx = -1;
     for (let j = 0; j < L.words.length; j += 1) {
       const w = L.words[j];
       const span = spans[j];
       if (!span) continue;
       const dur = Math.max(w.len, 0.15);
-      span.classList.toggle("active", t >= w.t && t < w.t + dur);
+      const isActive = t >= w.t && t < w.t + dur;
+      span.classList.toggle("active", isActive);
       span.classList.toggle("sung", t >= w.t + dur);
+      if (isActive) activeIdx = j;
+      if (nextIdx === -1 && t < w.t) nextIdx = j;
+    }
+
+    // bouncing ball over the current (or upcoming) word
+    const ballIdx = activeIdx >= 0 ? activeIdx : nextIdx;
+    const lineLive = t >= L.t - LYRIC_LEAD && t <= L.end + 0.4;
+    if (ballIdx >= 0 && spans[ballIdx] && lineLive) {
+      const span = spans[ballIdx];
+      lyricBall.style.left = (span.offsetLeft + span.offsetWidth / 2) + "px";
+      lyricBall.style.opacity = "1";
+    } else {
+      lyricBall.style.opacity = "0";
     }
   }
 
@@ -1073,5 +1113,5 @@
 
   bindDrop();
   updateOrientUI();
-  console.info("[fretboard] song analyzer build 12");
+  console.info("[fretboard] song analyzer build 13");
 })();
