@@ -46,7 +46,7 @@
     const o1 = ctx.createOscillator(), o2 = ctx.createOscillator(), t = ctx.createBiquadFilter(), g = ctx.createGain();
     o1.type = "sawtooth"; o2.type = "sawtooth"; o1.frequency.value = p.freq; o2.frequency.value = p.freq; o2.detune.value = 6;
     t.type = "lowpass"; t.frequency.value = p.palmMute ? 1400 : 3200;
-    const peak = (p.accent ? 0.27 : 0.22) * vol;
+    const peak = (p.accent ? 0.4 : 0.32) * vol;
     g.gain.setValueAtTime(0.0001, when);
     g.gain.linearRampToValueAtTime(peak, when + 0.006);
     g.gain.exponentialRampToValueAtTime(0.0001, when + dur + (p.palmMute ? 0.07 : 0.18));
@@ -64,10 +64,10 @@
     o1.type = "sawtooth"; o2.type = "sawtooth"; o3.type = "triangle";
     o1.frequency.value = p.freq; o2.frequency.value = p.freq; o3.frequency.value = p.freq * 0.5;
     o1.detune.value = 4; o2.detune.value = -7;
-    const peak = (p.accent ? 0.3 : 0.22) * vol;
+    const peak = (p.accent ? 0.85 : 0.65) * vol;
     g.gain.setValueAtTime(0.0001, when);
     g.gain.linearRampToValueAtTime(peak, when + 0.005);
-    g.gain.exponentialRampToValueAtTime(p.palmMute ? 0.05 * vol : 0.1 * vol, when + dur * 0.6);
+    g.gain.exponentialRampToValueAtTime(p.palmMute ? 0.2 * vol : 0.34 * vol, when + dur * 0.6);
     g.gain.exponentialRampToValueAtTime(0.0001, when + dur + (p.palmMute ? 0.08 : 0.22));
     o1.connect(pre); o2.connect(pre); o3.connect(pre); pre.connect(drive); drive.connect(cab); cab.connect(g); g.connect(dest);
     const end = when + dur + 0.35; [o1, o2, o3].forEach((o) => { o.start(when); o.stop(end); });
@@ -79,7 +79,7 @@
     const ring = Math.min(2.6, dur * 2.2 + 0.7);
     const g = ctx.createGain();
     g.gain.setValueAtTime(0.0001, when);
-    g.gain.linearRampToValueAtTime(0.26 * vol, when + 0.004);
+    g.gain.linearRampToValueAtTime(0.42 * vol, when + 0.004);
     g.gain.exponentialRampToValueAtTime(0.0001, when + ring);
     g.connect(dest);
     const oscs = [];
@@ -98,7 +98,7 @@
     const src = ctx.createBufferSource();
     src.buffer = ksBuffer(ctx, p.freq, ring, decay);
     const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = p.palmMute ? 2200 : 5200;
-    const g = ctx.createGain(); g.gain.value = (p.accent ? 0.95 : 0.72) * vol;
+    const g = ctx.createGain(); g.gain.value = (p.accent ? 1.5 : 1.15) * vol;
     src.connect(lp); lp.connect(g); g.connect(dest);
     src.start(when);
     return [src];

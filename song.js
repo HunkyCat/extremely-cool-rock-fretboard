@@ -220,7 +220,7 @@
 
   function buildSynthMaster(ctx) {
     const m = ctx.createGain();
-    m.gain.value = 0.7 * volume;
+    m.gain.value = 0.95 * volume;
     m.connect(ctx.destination);
     return m;
   }
@@ -364,7 +364,7 @@
   volumeSlider.addEventListener("input", () => {
     volume = clamp((parseInt(volumeSlider.value, 10) || 0) / 100, 0, 1);
     if (audioEl) audioEl.volume = volume;
-    if (synthMaster) synthMaster.gain.value = 0.7 * volume;
+    if (synthMaster) synthMaster.gain.value = 0.95 * volume;
   });
 
   // instrument selector
@@ -1314,5 +1314,5 @@
     ro.observe(canvas);
   }
 
-  console.info("[fretboard] song analyzer build 20");
+  console.info("[fretboard] song analyzer build 21");
 })();
