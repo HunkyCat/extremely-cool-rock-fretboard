@@ -1172,18 +1172,18 @@
     await ctx.resume();
 
     const midi = state.openMidis[stringIndex] + fret;
-    const chain = buildAmpChain(ctx, 0.16);
-    const start = ctx.currentTime + 0.02;
-    const note = { duration: 0.55, accent: true, palmMute: false };
-
-    scheduleSynthVoice(ctx, chain.input, start, midiToFrequency(midi), note, 1.0);
-
-    const stopAt = (start + 1.1 - ctx.currentTime) * 1000;
-    setTimeout(() => {
-      chain.nodes.forEach((node) => {
-        try { node.disconnect(); } catch (_ignored) {}
-      });
-    }, Math.max(0, stopAt));
+    if (window.Instruments) {
+      const out = ctx.createGain();
+      out.gain.value = 0.9;
+      out.connect(ctx.destination);
+      window.Instruments.playNote(ctx, out, { freq: midiToFrequency(midi), when: ctx.currentTime + 0.02, dur: 0.5, accent: true }, window.CurrentInstrument || "eguitar");
+      setTimeout(() => { try { out.disconnect(); } catch (_ignored) {} }, 3500);
+    } else {
+      const chain = buildAmpChain(ctx, 0.16);
+      const start = ctx.currentTime + 0.02;
+      scheduleSynthVoice(ctx, chain.input, start, midiToFrequency(midi), { duration: 0.55, accent: true, palmMute: false }, 1.0);
+      setTimeout(() => { chain.nodes.forEach((node) => { try { node.disconnect(); } catch (_ignored) {} }); }, 1200);
+    }
 
     currentHighlight = { string: 6 - stringIndex, fret };
     renderFretboard();

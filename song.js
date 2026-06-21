@@ -66,6 +66,7 @@
   const lyricLine = document.getElementById("lyricLine");
   const lyricBall = document.getElementById("lyricBall");
   const volumeSlider = document.getElementById("volume");
+  const instrumentSel = document.getElementById("instrumentSel");
   const scaleNowName = document.getElementById("scaleNowName");
   const scaleStrip = document.getElementById("scaleStrip");
   const infoSection = document.getElementById("infoSection");
@@ -104,9 +105,9 @@
   let startCtxTime = 0;
   let startPos = 0;
   let schedIdx = 0;
-  let amp = null;
+  let synthMaster = null;  // gain -> destination for the synth source (per-instrument timbre)
   let voices = []; // { node, end }
-  let distCurve = null;
+  let currentInstrument = "eguitar";
   let rate = 1;          // playback speed (1 = 100%)
   let loopA = null;
   let loopB = null;
@@ -213,63 +214,28 @@
     startPos = clamp(songTime(), 0, songLength());
     startCtxTime = audioCtx.currentTime;
     stopVoices();
-    amp = buildAmp(audioCtx);
+    synthMaster = buildSynthMaster(audioCtx);
     schedIdx = firstNoteIdx(startPos);
   }
 
-  function buildDistortion(amount) {
-    const n = 44100;
-    const curve = new Float32Array(n);
-    const deg = Math.PI / 180;
-    for (let i = 0; i < n; i += 1) {
-      const x = (i * 2) / n - 1;
-      curve[i] = ((3 + amount) * x * 20 * deg) / (Math.PI + amount * Math.abs(x));
-    }
-    return curve;
-  }
-
-  function buildAmp(ctx) {
-    if (!distCurve) distCurve = buildDistortion(360);
-    const hp = ctx.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 60;
-    const drive = ctx.createWaveShaper(); drive.curve = distCurve; drive.oversample = "4x";
-    const pre = ctx.createGain(); pre.gain.value = 1.5;
-    const cab = ctx.createBiquadFilter(); cab.type = "lowpass"; cab.frequency.value = 3400; cab.Q.value = 0.7;
-    const comp = ctx.createDynamicsCompressor();
-    comp.threshold.value = -24; comp.ratio.value = 4; comp.attack.value = 0.004; comp.release.value = 0.2;
-    const master = ctx.createGain(); master.gain.value = 0.16 * volume;
-    hp.connect(pre); pre.connect(drive); drive.connect(cab); cab.connect(comp); comp.connect(master);
-    master.connect(ctx.destination);
-    return { input: hp, master, nodes: [hp, pre, drive, cab, comp, master] };
+  function buildSynthMaster(ctx) {
+    const m = ctx.createGain();
+    m.gain.value = 0.7 * volume;
+    m.connect(ctx.destination);
+    return m;
   }
 
   function midiToFreq(m) { return 440 * 2 ** ((m - 69) / 12); }
 
   function scheduleNote(n, when) {
-    if (n.s < 0 || n.s > 5) return;
-    const ctx = audioCtx;
+    if (n.s < 0 || n.s > 5 || !synthMaster) return;
     const midi = arr.openMidi[n.s] + n.f;
-    const freq = midiToFreq(midi);
     const dur = Math.max(0.12, Math.min(n.sus || 0, 1.6) || 0.18);
-    const pm = !!n.pm;
-
-    const osc = ctx.createOscillator();
-    const osc2 = ctx.createOscillator();
-    const tone = ctx.createBiquadFilter();
-    const g = ctx.createGain();
-    osc.type = "sawtooth"; osc2.type = "sawtooth";
-    osc.frequency.value = freq; osc2.frequency.value = freq;
-    osc2.detune.value = 6;
-    tone.type = "lowpass";
-    tone.frequency.value = pm ? 1400 : 3200;
-    const peak = pm ? 0.16 : 0.24;
-    g.gain.setValueAtTime(0.0001, when);
-    g.gain.linearRampToValueAtTime(peak, when + 0.006);
-    g.gain.exponentialRampToValueAtTime(pm ? 0.06 : 0.12, when + dur * 0.6);
-    g.gain.exponentialRampToValueAtTime(0.0001, when + dur + (pm ? 0.06 : 0.18));
-    osc.connect(tone); osc2.connect(tone); tone.connect(g); g.connect(amp.input);
-    const end = when + dur + 0.2;
-    osc.start(when); osc2.start(when); osc.stop(end); osc2.stop(end);
-    voices.push({ node: osc, end }, { node: osc2, end });
+    const nodes = window.Instruments.playNote(audioCtx, synthMaster, {
+      freq: midiToFreq(midi), when, dur, accent: !!n.acc, palmMute: !!n.pm, gain: 1,
+    }, currentInstrument);
+    const end = when + dur + 0.4;
+    for (const nd of nodes) voices.push({ node: nd, end });
   }
 
   function stopVoices() {
@@ -278,7 +244,7 @@
       try { v.node.disconnect(); } catch (_) {}
     }
     voices = [];
-    if (amp) { amp.nodes.forEach((nd) => { try { nd.disconnect(); } catch (_) {} }); amp = null; }
+    if (synthMaster) { try { synthMaster.disconnect(); } catch (_) {} synthMaster = null; }
   }
 
   function firstNoteIdx(t) {
@@ -314,7 +280,7 @@
     const ctx = ensureCtx();
     await ctx.resume();
     if (pausedPos >= songLength() - 0.05) pausedPos = 0;
-    amp = buildAmp(ctx);
+    synthMaster = buildSynthMaster(ctx);
     startPos = pausedPos;
     startCtxTime = ctx.currentTime;
     schedIdx = firstNoteIdx(startPos);
@@ -337,7 +303,7 @@
     if (source === "original" && audioEl) { audioEl.currentTime = t; renderFrame(); return; }
     if (playing) {
       stopVoices();
-      amp = buildAmp(audioCtx);
+      synthMaster = buildSynthMaster(audioCtx);
       startPos = t;
       startCtxTime = audioCtx.currentTime;
       schedIdx = firstNoteIdx(t);
@@ -398,7 +364,25 @@
   volumeSlider.addEventListener("input", () => {
     volume = clamp((parseInt(volumeSlider.value, 10) || 0) / 100, 0, 1);
     if (audioEl) audioEl.volume = volume;
-    if (amp && amp.master) amp.master.gain.value = 0.16 * volume;
+    if (synthMaster) synthMaster.gain.value = 0.7 * volume;
+  });
+
+  // instrument selector
+  Instruments.list.forEach((it) => {
+    const opt = document.createElement("option");
+    opt.value = it.id; opt.textContent = it.name;
+    instrumentSel.appendChild(opt);
+  });
+  try {
+    const saved = window.localStorage.getItem("fretboard.instrument");
+    if (saved && Instruments.list.some((i) => i.id === saved)) currentInstrument = saved;
+  } catch (_) {}
+  instrumentSel.value = currentInstrument;
+  window.CurrentInstrument = currentInstrument;
+  instrumentSel.addEventListener("change", () => {
+    currentInstrument = instrumentSel.value;
+    window.CurrentInstrument = currentInstrument;
+    try { window.localStorage.setItem("fretboard.instrument", currentInstrument); } catch (_) {}
   });
 
   sourceSel.addEventListener("change", async () => {
@@ -789,22 +773,11 @@
     const ctx = ensureCtx();
     ctx.resume();
     const midi = arr.openMidi[s] + f;
-    const freq = midiToFreq(midi);
-    const now = ctx.currentTime + 0.01;
-    const a = buildAmp(ctx);
-    const osc = ctx.createOscillator();
-    const osc2 = ctx.createOscillator();
-    const tone = ctx.createBiquadFilter();
-    const g = ctx.createGain();
-    osc.type = "sawtooth"; osc2.type = "sawtooth";
-    osc.frequency.value = freq; osc2.frequency.value = freq; osc2.detune.value = 6;
-    tone.type = "lowpass"; tone.frequency.value = 3000;
-    g.gain.setValueAtTime(0.0001, now);
-    g.gain.linearRampToValueAtTime(0.26, now + 0.006);
-    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.55);
-    osc.connect(tone); osc2.connect(tone); tone.connect(g); g.connect(a.input);
-    osc.start(now); osc2.start(now); osc.stop(now + 0.6); osc2.stop(now + 0.6);
-    setTimeout(() => { a.nodes.forEach((n) => { try { n.disconnect(); } catch (_) {} }); }, 900);
+    const out = ctx.createGain();
+    out.gain.value = 0.9 * volume;
+    out.connect(ctx.destination);
+    window.Instruments.playNote(ctx, out, { freq: midiToFreq(midi), when: ctx.currentTime + 0.01, dur: 0.5, accent: true }, currentInstrument);
+    setTimeout(() => { try { out.disconnect(); } catch (_) {} }, 3500);
   }
   canvas.addEventListener("click", (e) => {
     if (!arr || !cssW) return;
@@ -999,11 +972,16 @@
       }
     }
 
-    // click-to-play flash
+    // click-to-play: draw the clicked note as a gem coloured by scale membership
     if (clickFlash && performance.now() - clickFlash.t0 < 480 && clickFlash.s >= 0 && clickFlash.s <= 5) {
       const fx = xNote(L, clickFlash.f), fy = yString(L, clickFlash.s);
-      ctx.strokeStyle = "#fef3c7"; ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.arc(fx, fy, r + 5, 0, Math.PI * 2); ctx.stroke();
+      const pc = (arr.openMidi[clickFlash.s] + clickFlash.f) % 12;
+      const inScale = scaleSet ? scaleSet.has(pc) : true;
+      ctx.fillStyle = inScale ? "#22c55e" : "#fb923c";
+      ctx.strokeStyle = "#fff7ed"; ctx.lineWidth = 2.6;
+      ctx.beginPath(); ctx.arc(fx, fy, r + 3, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = "#0b1220"; ctx.font = `800 ${r + 1}px Rajdhani, Segoe UI, sans-serif`;
+      ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(String(clickFlash.f), fx, fy);
     }
 
     ctx.fillStyle = "#94a3b8"; ctx.font = "600 11px Rajdhani, Segoe UI, sans-serif"; ctx.textAlign = "center";
@@ -1336,5 +1314,5 @@
     ro.observe(canvas);
   }
 
-  console.info("[fretboard] song analyzer build 19");
+  console.info("[fretboard] song analyzer build 20");
 })();
